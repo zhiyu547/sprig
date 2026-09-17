@@ -216,9 +216,17 @@ extension GitRepository {
         var fields = data.components(separatedBy: "\0")
         if fields.last == "" { fields.removeLast() }
         guard fields.count % 7 == 0 else { throw GitError.message("无法解析提交历史。") }
-        return stride(from: 0, to: fields.count, by: 7).map { i in
-            GitCommit(oid: fields[i].trimmingCharacters(in: .newlines), parents: fields[i+1].split(separator: " ").map(String.init), author: fields[i+2], date: fields[i+3], subject: fields[i+4], body: fields[i+5].trimmingCharacters(in: .newlines), decorations: fields[i+6])
+        var commits: [GitCommit] = []
+        for i in stride(from: 0, to: fields.count, by: 7) {
+            let oid = fields[i].trimmingCharacters(in: .newlines)
+            let parents: [String] = fields[i + 1].split(separator: " ").map { String($0) }
+            let body = fields[i + 5].trimmingCharacters(in: .newlines)
+            let commit = GitCommit(oid: oid, parents: parents, author: fields[i + 2],
+                                   date: fields[i + 3], subject: fields[i + 4],
+                                   body: body, decorations: fields[i + 6])
+            commits.append(commit)
         }
+        return commits
     }
     public func commitFiles(_ commit: GitCommit) async throws -> [CommitFile] {
         let oid = try await verifiedRevision(commit.oid)
