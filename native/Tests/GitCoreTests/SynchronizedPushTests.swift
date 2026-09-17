@@ -181,6 +181,16 @@ extension OperationsTests {
         XCTAssertTrue(GitRepository.isPushRace(result("!\tHEAD:refs/heads/main\t[remote rejected] (incorrect old value provided)\n")))
         XCTAssertFalse(GitRepository.isPushRace(result("fatal: Authentication failed")))
     }
+    func testOlderGitRefFailureRetriesOnlyMatchingConcurrentUpdate() {
+        let output = "!\tHEAD:refs/heads/main\t[remote rejected] (failed to update ref)\n"
+        let oldOID = String(repeating: "a", count: 40), newOID = String(repeating: "b", count: 40)
+        func rejected(_ error: String) -> CommandResult { CommandResult(data: Data(output.utf8), error: error, code: 1) }
+        let mismatch = "remote: error: cannot lock ref 'refs/heads/main': is at \(newOID) but expected \(oldOID)        \n"
+        XCTAssertTrue(GitRepository.isPushRace(rejected(mismatch)))
+        XCTAssertFalse(GitRepository.isPushRace(rejected(mismatch.replacingOccurrences(of: "refs/heads/main", with: "refs/heads/other"))))
+        XCTAssertFalse(GitRepository.isPushRace(rejected("remote: error: cannot lock ref 'refs/heads/main': Permission denied\n")))
+        XCTAssertFalse(GitRepository.isPushRace(rejected("")))
+    }
     func testSyncRejectsChangedHeadAndMultiplePushURLsBeforeMutation() async throws {
         let (remote, _) = try syncFixture(), before = try git(["rev-parse", "HEAD"])
         try localCommit(); let repo = try await GitRepository.open(root)

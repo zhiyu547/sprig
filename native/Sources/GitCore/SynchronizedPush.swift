@@ -152,8 +152,22 @@ extension GitRepository {
     public static func isPushRace(_ result: CommandResult) -> Bool {
         // Porcelain distinguishes client non-fast-forward rejection from server
         // hooks, protected branches, auth errors, and transport failures.
-        result.code != 0 && result.text.split(separator: "\n").contains {
-            $0.hasPrefix("!\t") && (($0.contains("[rejected]") && ($0.contains("(fetch first)") || $0.contains("(non-fast-forward)"))) || $0.hasSuffix("[remote rejected] (incorrect old value provided)"))
+        guard result.code != 0 else { return false }
+        return result.text.split(separator: "\n").contains { line in
+            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard fields.count == 3, fields[0] == "!" else { return false }
+            let status = fields[2]
+            if status == "[rejected] (fetch first)" || status == "[rejected] (non-fast-forward)" ||
+                status == "[remote rejected] (incorrect old value provided)" { return true }
+            // Older Git reports a concurrent update as a generic ref failure.
+            // Retry only with an explicit old/new OID mismatch for this same ref.
+            guard status == "[remote rejected] (failed to update ref)",
+                  let ref = fields[1].split(separator: ":", maxSplits: 1).last,
+                  ref.hasPrefix("refs/heads/") else { return false }
+            let escapedRef = NSRegularExpression.escapedPattern(for: String(ref))
+            let oid = "(?:[0-9a-f]{40}|[0-9a-f]{64})"
+            let mismatch = "(?m)^remote: error: cannot lock ref '" + escapedRef + "': is at " + oid + " but expected " + oid + "[ \\t]*$"
+            return result.error.range(of: mismatch, options: .regularExpression) != nil
         }
     }
 
