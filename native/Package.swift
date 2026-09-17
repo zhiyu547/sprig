@@ -1,4 +1,6 @@
 // swift-tools-version: 5.9
+// Copyright (c) 2026 zhiyu
+// SPDX-License-Identifier: LicenseRef-Sprig-NC-SA-1.0
 import PackageDescription
 
 let package = Package(
