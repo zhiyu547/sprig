@@ -1,0 +1,22 @@
+name: Build and test
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Native tests
+        run: swift test --package-path native
+      - name: Release validation tests
+        run: python3 -m unittest discover -s native/scripts/tests -v
+      - name: Universal build
+        run: swift build --package-path native -c release --product GitTool --arch arm64 --arch x86_64
+      - name: Verify application packaging
+        run: python3 native/scripts/package_app.py --arch universal

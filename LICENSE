@@ -1,0 +1,109 @@
+Sprig Non-Commercial Share-Alike License 1.0
+SPDX-License-Identifier: LicenseRef-Sprig-NC-SA-1.0
+
+Copyright (c) 2026 zhiyu
+
+1. Scope and definitions
+
+"Software" means the original Sprig source code, executables, documentation,
+and project assets made available under this license. Separately identified
+third-party components remain subject to their own licenses. "Derivative"
+means a modification, translation, adaptation, or other work incorporating
+copyrightable portions of the Software. An independent program or repository
+merely managed, read, edited, or committed using Sprig is not a Derivative.
+"You" includes an individual or a legal entity exercising these permissions.
+
+2. Permission and attribution
+
+Subject to all terms below, zhiyu grants you a worldwide, royalty-free,
+non-exclusive copyright license to use, study, copy, modify, and distribute
+the Software and Derivatives for non-commercial purposes, and for the
+internal-use exception in section 3. Preserve this license, applicable
+copyright notices, and third-party notices in every copy or substantial
+portion. Mark modifications and identify their authors and dates without
+misrepresenting a modified version as an official Sprig release.
+
+3. Commercial restriction and internal-use exception
+
+All commercial uses require a separate written license from the relevant
+rights holders, EXCEPT that a business or other organization may use and
+modify Sprig internally as a development tool, including to develop and
+maintain its own or its customers' commercial projects. Employees and
+contractors acting solely on that organization's behalf may receive and use
+internal copies. They may not redistribute those copies outside this scope.
+
+This exception does not permit selling, sublicensing for a fee, renting,
+monetizing, commercially distributing, or commercially bundling Sprig or a
+Derivative; incorporating it into a product supplied to customers; offering
+its functionality as an external commercial or hosted service; or providing
+paid Sprig-specific hosting, customization, distribution, or support.
+Free delivery as part of a paid product, subscription, advertising-supported
+offering, or other commercial arrangement is also commercial use.
+
+Fees earned from independently developed work merely managed using Sprig do
+not constitute commercial exploitation of Sprig. Merely opening a business
+repository in Sprig does not bring that repository under this license.
+
+4. Source availability and share-alike
+
+When you distribute the Software or any Derivative outside the internal-use
+exception, or make its functionality available to external users over a
+network, you must also publish the complete corresponding source code of
+that version, free of charge, at a publicly accessible URL. Include that URL
+and this license prominently with the distribution or service. Keep the
+source available for as long as that distribution or service is offered and
+for at least three years afterward.
+
+Corresponding source means the preferred form for making modifications,
+including your modifications, necessary interface definitions, dependency
+versions, and scripts and instructions needed to build and install that
+version. It does not include private signing keys, personal credentials,
+user data, independently licensed general-purpose build tools, or system
+libraries. Do not publish secrets to comply with this clause.
+
+License all covered portions of Derivatives under this same license, without
+additional restrictions that prevent recipients from exercising its rights.
+Third-party components keep their own licenses; you may not relicense them
+under this license. Share-alike does not authorize commercial distribution
+or commercial network services prohibited by section 3. Private personal
+modifications and internal organizational modifications need not be published
+unless they are subsequently distributed or offered externally.
+
+5. Rights reserved and third-party materials
+
+No trademark license or right to imply endorsement is granted, beyond fair
+identification and attribution. Do not impersonate the official project or
+publisher. This license grants only rights that the licensor has authority
+to grant and does not override third-party licenses or statutory rights.
+All rights not expressly granted are reserved. The copyright holders may
+offer separate written permissions for their own contributions. Such an
+exception must identify its scope; it does not automatically cover other
+contributors' or third parties' work.
+
+6. Termination
+
+Your permissions terminate automatically if you violate these terms.
+If you stop the violation and remedy it within 30 days of discovering it,
+your permissions are reinstated unless the relevant copyright holder has
+expressly and finally terminated them. Termination does not affect licenses
+already received by downstream recipients who remain in compliance.
+
+7. Disclaimer and limitation of liability
+
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED "AS IS",
+WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. THE AUTHORS AND
+COPYRIGHT HOLDERS SHALL NOT BE LIABLE FOR CLAIMS, DAMAGES, OR OTHER LIABILITY
+ARISING FROM THE SOFTWARE OR ITS USE, WHETHER IN CONTRACT, TORT, OR OTHERWISE.
+Nothing in this license excludes liability that cannot lawfully be excluded.
+
+8. Interpretation
+
+This is a custom source-available license with commercial-use restrictions;
+it is not an OSI-approved open-source license, MIT, AGPL, or a Creative Commons
+license. The English text is authoritative. LICENSE.zh-CN.md explains these
+terms in Chinese and does not grant additional rights. If a term is found
+unenforceable, the remaining terms continue to apply to the extent allowed
+by law.
+
+Project and authorization contact: https://github.com/zhiyu547/sprig

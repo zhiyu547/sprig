@@ -1,0 +1,53 @@
+name: Publish signed update
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: sprig-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate tag and repository
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          c = json.load(open('native/release.json'))
+          assert os.environ['RELEASE_TAG'] == 'v' + c['version'], 'Tag must match release.json'
+          assert os.environ['RELEASE_REPOSITORY'] == c['repository'], 'Forks must configure their own repository and update key'
+          PY
+      - name: Native and release tests
+        run: |
+          swift test --package-path native
+          python3 -m unittest discover -s native/scripts/tests -v
+      - name: Universal build and bundle verification
+        run: |
+          swift build --package-path native -c release --product GitTool --arch arm64 --arch x86_64
+          python3 native/scripts/package_app.py --arch universal
+          python3 native/scripts/package_dmg.py
+      - name: Sign and independently verify update
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          if not os.environ.get('SPARKLE_PRIVATE_KEY'):
+              raise SystemExit('Configure the SPARKLE_PRIVATE_KEY repository secret before publishing')
+          subprocess.run(['python3', 'native/scripts/prepare_release.py'], check=True)
+          PY
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 native/scripts/publish_release.py
