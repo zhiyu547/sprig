@@ -172,6 +172,38 @@ final class OperationsTests: XCTestCase {
         let repo = try await GitRepository.open(root), context = try await repo.aiContext(configuration: configuration)
         XCTAssertFalse(context.canGenerate); XCTAssertEqual(context.excluded.count, 2); XCTAssertTrue(context.excluded.contains { $0.contains("renamed.txt") && $0.contains(".env") })
     }
+    func testAIFiltersLargeExcludedFilesBeforeLoadingCombinedDiff() async throws {
+        try initial()
+        try write("pnpm-lock.yaml", String(repeating: "generated-lock-entry\n", count: 250_000))
+        try write("service.txt", "selected\npassword: synthetic-batch-secret\n")
+        try git(["add", "."])
+        let repo = try await GitRepository.open(root), context = try await repo.aiContext(configuration: .init())
+        XCTAssertEqual(context.included, ["service.txt"])
+        XCTAssertEqual(context.excluded.count, 1)
+        XCTAssertTrue(context.patch.contains("+selected"))
+        XCTAssertFalse(context.patch.contains("synthetic-batch-secret"))
+        XCTAssertFalse(context.batches.map(\.patch).joined().contains("generated-lock-entry"))
+    }
+
+    func testAIContextAcceptsThirtyFilesOverOldByteLimit() async throws {
+        try initial()
+        for index in 0..<30 {
+            let lines = (0..<160).map { "// 模块 \(index)，变更 \($0)：添加专注模式的筛选逻辑" }.joined(separator: "\n")
+            try write("module-\(index).swift", lines + "\n")
+        }
+        try git(["add", "."])
+        // A working-tree edit must still stay out of the outbound context.
+        try write("module-0.swift", "working-only-marker\n")
+        let repo = try await GitRepository.open(root), before = try await repo.stamp()
+        let context = try await repo.aiContext(configuration: .init())
+        XCTAssertEqual(context.included.count, 30)
+        XCTAssertGreaterThan(context.patch.utf8.count, 160_000)
+        XCTAssertTrue(context.patch.contains("模块 29，变更 159"))
+        XCTAssertFalse(context.patch.contains("working-only-marker"))
+        let after = try await repo.stamp()
+        XCTAssertEqual(before, after)
+    }
+
     func testAIContextUsesOnlyStagedAndExcludesSensitiveContent() async throws {
         try initial(); try write("service.txt", "staged change\n"); try write(".env", "PASSWORD=supersecret0123456789  \n"); try write("config.txt", "api_key=longtestsecret0123456789\n"); try git(["add", "."]); try write("service.txt", "working change\n")
         let repo = try await GitRepository.open(root), context = try await repo.aiContext(configuration: .init())

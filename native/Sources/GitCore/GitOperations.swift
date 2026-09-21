@@ -84,12 +84,12 @@ extension GitRepository {
         let bytes = FileManager.default.fileExists(atPath: index.path) ? try Data(contentsOf: index, options: .mappedIfSafe) : Data()
         return IndexStamp(head: head, branch: branchResult.code == 0 ? branchResult.text.trimmingCharacters(in: .newlines) : "(detached)", indexHash: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined())
     }
-    public func prepareCommit(amend: Bool = false) async throws -> CommitPreparation {
+    public func prepareCommit(amend: Bool = false, includePatch: Bool = true) async throws -> CommitPreparation {
         let before = try await stamp(), state = try await snapshot()
         guard state.operation == nil, !state.files.contains(where: \.conflict) else { throw GitError.message("仓库有冲突或正在进行的 Git 操作，请先处理后提交。") }
         let files = state.files.filter(\.hasStaged)
         guard !files.isEmpty || (amend && before.head != "(initial)") else { throw GitError.message("请先勾选需要提交的文件，或在外部编辑器中暂存内容。") }
-        let patch = try await checked(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames", "--unified=4"])
+        let patch = includePatch ? try await checked(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames", "--unified=4"]) : ""
         let check = try await runner.run(["diff", "--cached", "--check"], at: root)
         guard before == (try await stamp()) else { throw GitError.message("读取期间暂存区发生变化，请刷新后重试。") }
         return CommitPreparation(stamp: before, files: files, patch: patch, checkOutput: check.text + check.error)

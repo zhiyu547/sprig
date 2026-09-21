@@ -268,20 +268,37 @@ struct AIConfirmSheet: View {
     @ObservedObject var store: RepositoryStore
     let context: AIContext
     let intent: AIIntent
+    @State private var previewIndex = 0
     var body: some View {
         SheetFrame(store: store, title: !context.canGenerate ? "暂无可发送的暂存内容" : intent == .commit ? "生成提交说明" : "AI 检查暂存代码") {
             Text(context.coverage).font(.headline)
             Text("服务：\((try? store.settings.ai.endpoint().absoluteString) ?? store.settings.ai.baseURL)\n模型：\(store.settings.ai.model)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            if context.batches.count > 1 {
+                Text("差异约 \((context.patch.utf8.count + 999) / 1000) KB · 自动分为 \(context.batches.count) 段" + (intent == .commit ? "分析后汇总" : "分别审查"))
+                    .font(.subheadline.weight(.medium)).foregroundStyle(Palette.mint)
+                Text("会多次调用当前 AI 服务，耗时与用量随改动增加；可随时取消，整次最多等待 10 分钟。")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("差异预览 · 第 \(previewIndex + 1) / \(context.batches.count) 段").font(.caption)
+                    Spacer()
+                    Button("上一段") { previewIndex -= 1 }.disabled(previewIndex == 0)
+                    Button("下一段") { previewIndex += 1 }.disabled(previewIndex + 1 == context.batches.count)
+                }
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     if !context.included.isEmpty { Text("发送文件").font(.caption.bold()); Text(context.included.joined(separator: "\n")).font(.caption) }
                     if !context.redacted.isEmpty { Text("已在本机脱敏\n" + context.redacted.joined(separator: "\n")).font(.caption).foregroundStyle(Palette.mint) }
                     if !context.excluded.isEmpty { Text("已排除\n" + context.excluded.joined(separator: "\n")).font(.caption).foregroundStyle(.orange) }
                     Divider()
-                    Text(context.patch).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                    if context.batches.indices.contains(previewIndex) {
+                        let batch = context.batches[previewIndex]
+                        if !batch.continuation.isEmpty { Text(batch.continuation).font(.caption).foregroundStyle(.secondary) }
+                        Text(batch.patch).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                    }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.frame(height: 300)
-            Text(context.canGenerate ? "仅发送上方预览内容。匹配到的敏感值已遮盖；排除文件不在分析范围内。" : "所选文件均已排除，尚未调用 AI。请根据上方原因调整排除规则或选择其他暂存文件。").font(.caption).foregroundStyle(.secondary)
+            Text(context.canGenerate ? "仅发送上述文件的全部预览分段；汇总时还会发送分段分析结果。匹配到的敏感值已遮盖，排除文件不在分析范围内。" : "所选文件均已排除，尚未调用 AI。请根据上方原因调整排除规则或选择其他暂存文件。").font(.caption).foregroundStyle(.secondary)
         } actions: {
             Button("返回") { store.sheet = nil }
             if !context.excluded.isEmpty { Button("AI 排除设置…") { store.sheet = WorkspaceSheet(kind: .settings) } }
@@ -297,6 +314,7 @@ struct AIResultSheet: View {
     var body: some View {
         SheetFrame(store: store, title: intent == .commit ? "检查 AI 生成的提交说明" : "AI 检查结果") {
             Text(context.coverage).font(.caption).foregroundStyle(.secondary)
+            if context.batches.count > 1 { Text(intent == .commit ? "已分 \(context.batches.count) 段分析并汇总，请核对是否遗漏关键改动。" : "已分 \(context.batches.count) 段审查，跨段关联可能未发现。").font(.caption).foregroundStyle(.secondary) }
             if !context.redacted.isEmpty { Text("已基于脱敏后的差异生成，未分析敏感值本身。").font(.caption).foregroundStyle(Palette.mint) }
             if !context.excluded.isEmpty { Text("不包含：" + context.excluded.joined(separator: "、")).font(.caption).foregroundStyle(.orange).lineLimit(3) }
             TextEditor(text: $text).font(.system(size: 13, design: .monospaced)).frame(height: 370).overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))

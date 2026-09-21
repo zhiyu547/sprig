@@ -279,8 +279,12 @@ extension RepositoryStore {
                 let endpoint = try configuration.endpoint().absoluteString, key = try await KeychainStore.read(endpoint: endpoint)
                 try Task.checkCancellation()
                 guard requestID == aiRequestID else { return }
-                busyTitle = intent == .commit ? "AI 正在生成提交说明 · 最长等待 90 秒" : "AI 正在检查暂存内容 · 最长等待 90 秒"
-                let result = try await AIClient().generate(context: context, configuration: configuration, key: key, intent: intent)
+                let result = try await AIClient().generate(context: context, configuration: configuration, key: key, intent: intent) { [self] title in
+                    await MainActor.run {
+                        guard requestID == self.aiRequestID else { return }
+                        self.busyTitle = title + " · 单次最多等待 90 秒"
+                    }
+                }
                 try Task.checkCancellation()
                 guard requestID == aiRequestID else { return }
                 sheet = WorkspaceSheet(kind: .aiResult(context, result, intent))
