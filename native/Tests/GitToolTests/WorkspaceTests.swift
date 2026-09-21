@@ -45,6 +45,10 @@ final class WorkspaceTests: XCTestCase {
         try await settle(); unchanged()
         store.error = String(repeating: "接口等待失败，请重试。", count: 40); try await settle(); unchanged()
         store.error = nil; store.preview = DiffPreview(file: store.selected!, scope: .working, document: .notice("二进制文件", path: store.selectedPath!)); try await settle(); unchanged()
+        window.setContentSize(NSSize(width: 940, height: 680))
+        try await settle()
+        XCTAssertEqual(window.contentView?.bounds.width ?? 0, 940, accuracy: 0.5)
+        XCTAssertEqual(window.contentView?.bounds.height ?? 0, 680, accuracy: 0.5)
     }
     @MainActor func testCommitPanelHeightPersistsAndRecoversAfterWindowShrink() throws {
         _ = NSApplication.shared

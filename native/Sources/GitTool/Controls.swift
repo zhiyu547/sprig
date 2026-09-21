@@ -3,7 +3,7 @@
 
 import SwiftUI
 
-enum ControlTone { case quiet, subtle, primary, accent, selected }
+enum ControlTone { case quiet, subtle, primary, accent, selected, segment }
 
 /// Shared desktop chrome: stable bounds, visible hover/press states, native Button semantics.
 struct ControlSurface: ViewModifier {
@@ -18,6 +18,7 @@ struct ControlSurface: ViewModifier {
         switch tone {
         case .primary: return .white
         case .accent: return Palette.mint
+        case .segment: return .white
         case .selected: return Color(red: 0.70, green: 0.82, blue: 1)
         default: return Color.white.opacity(0.86)
         }
@@ -27,6 +28,7 @@ struct ControlSurface: ViewModifier {
         switch tone {
         case .primary: return Palette.blue.opacity(pressed ? 0.74 : active ? 1 : 0.90)
         case .accent: return Palette.mint.opacity(pressed ? 0.23 : active ? 0.17 : 0.09)
+        case .segment: return .white.opacity(pressed ? 0.19 : active ? 0.24 : 0.20)
         case .selected: return Palette.blue.opacity(pressed ? 0.30 : active ? 0.25 : 0.19)
         case .subtle: return .white.opacity(pressed ? 0.12 : active ? 0.08 : 0.035)
         case .quiet: return .white.opacity(pressed ? 0.12 : active ? 0.075 : 0)
@@ -36,13 +38,14 @@ struct ControlSurface: ViewModifier {
         switch tone {
         case .primary: return .white.opacity(0.12)
         case .accent: return Palette.mint.opacity(hovered ? 0.34 : 0.18)
+        case .segment: return .white.opacity(0.10)
         case .selected: return Palette.blue.opacity(0.32)
         case .subtle: return .white.opacity(hovered ? 0.16 : 0.09)
         case .quiet: return .white.opacity(hovered ? 0.10 : 0)
         }
     }
     func body(content: Content) -> some View {
-        content.font(.system(size: 12, weight: .medium))
+        content.font(.system(size: 13, weight: .medium))
             .foregroundStyle(foreground)
             .padding(.horizontal, horizontalPadding).frame(height: height)
             .background(fill, in: RoundedRectangle(cornerRadius: 7))
@@ -73,7 +76,7 @@ struct ToolbarIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 13, weight: .medium))
-                .symbolRenderingMode(.hierarchical).frame(width: size)
+                .symbolRenderingMode(.hierarchical).frame(width: size, height: size).contentShape(Rectangle())
         }.buttonStyle(SprigButtonStyle(tone: tone, height: size, horizontalPadding: 0))
             .accessibilityLabel(title).help(tooltip ?? title)
     }
@@ -95,5 +98,25 @@ struct DiffModeControl: View {
         }.buttonStyle(SprigButtonStyle(tone: split == value ? .selected : .quiet, height: 26, horizontalPadding: 8))
             .accessibilityLabel(title + "差异视图").accessibilityValue(split == value ? "已选中" : "未选中")
             .help(value ? "左右并排对比修改前后的代码" : "在同一列查看全部增删行")
+    }
+}
+
+
+/// A compact, keyboard-accessible strip with consistent bounds at every selection.
+struct SelectionStrip<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [(String, Value)]
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options.indices, id: \.self) { index in
+                let item = options[index]
+                Button { selection = item.1 } label: {
+                    Text(item.0).lineLimit(1).frame(maxWidth: .infinity).frame(height: 24).contentShape(Rectangle())
+                }.buttonStyle(SprigButtonStyle(tone: selection == item.1 ? .segment : .quiet, height: 24, horizontalPadding: 4))
+                    .accessibilityLabel(item.0).accessibilityValue(selection == item.1 ? "已选中" : "未选中")
+            }
+        }.padding(2).background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.border))
+            .accessibilityElement(children: .contain)
     }
 }

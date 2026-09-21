@@ -33,7 +33,13 @@ struct DiffPreview {
     let document: DiffDocument
 }
 
+enum ManualRefreshState: Equatable {
+    case idle, refreshing, updated(Date), failed
+}
+
 @MainActor final class RepositoryStore: ObservableObject {
+    @Published private(set) var manualRefreshState: ManualRefreshState = .idle
+    private var manualRefreshRequested = false
     let settings = AppSettings()
     @Published var page: WorkspacePage = .changes
     @Published var busy = false
@@ -130,6 +136,7 @@ struct DiffPreview {
     func open(_ url: URL) {
         guard !busy else { return }
         openTask?.cancel(); refreshTask?.cancel(); diffTask?.cancel(); debounceTask?.cancel(); watcher?.stop()
+        resetManualRefresh()
         repositoryToken = UUID(); let token = repositoryToken
         auxiliaryToken = UUID(); historyToken = UUID(); detailToken = UUID()
         history = []; historyFiles = []; historyDocument = nil; selectedCommit = nil; stashes = []; stashDocument = nil; selectedStash = nil; selectedHistoryFile = nil; refs = []; historyLoading = false; showBranches = false
@@ -151,7 +158,7 @@ struct DiffPreview {
                     Task { @MainActor in self?.scheduleRefresh() }
                 }
                 watching = watcher?.isRunning == true
-                if !watching { error = "文件监听未能启动。可使用右上角刷新按钮更新。" }
+                if !watching { error = "文件监听未能启动。可使用文件列表上方的刷新按钮或 ⌘R 更新。" }
                 (NSApp.mainWindow ?? NSApp.windows.first(where: { $0.canBecomeMain && !$0.isSheet }))?.title = "\(repo.root.lastPathComponent) — Sprig"
             } catch {
                 guard !Task.isCancelled, token == repositoryToken else { return }
@@ -169,11 +176,25 @@ struct DiffPreview {
         }
     }
 
+    func manualRefresh() {
+        guard repository != nil, !opening, !busy, manualRefreshState != .refreshing else { return }
+        manualRefreshRequested = true
+        manualRefreshState = .refreshing
+        refresh()
+    }
+
+    private func resetManualRefresh() {
+        manualRefreshRequested = false
+        manualRefreshState = .idle
+    }
+
     func refresh() {
         guard let repository, !opening else { return }
         if busy { needsRefresh = true; return }
         // Serialize refreshes while retaining an event that arrived during a scan.
         if refreshing { scheduleRefresh(); return }
+        let isManual = manualRefreshRequested
+        manualRefreshRequested = false
         refreshing = true; let token = repositoryToken
         refreshTask = Task {
             do {
@@ -183,15 +204,18 @@ struct DiffPreview {
                 if error?.hasPrefix("刷新失败") == true { error = nil }
                 loadAuxiliary()
                 applySnapshot(state)
+                if isManual { manualRefreshState = .updated(Date()) }
             } catch {
                 guard !Task.isCancelled, token == repositoryToken else { return }
                 refreshing = false; self.error = "刷新失败，当前仍为上次读取结果。\n" + error.localizedDescription
+                if isManual { manualRefreshState = .failed }
             }
         }
     }
 
     func suspendRefreshForIndexWrite() {
         refreshTask?.cancel(); debounceTask?.cancel(); refreshing = false
+        if manualRefreshState == .refreshing { resetManualRefresh() }
     }
     func refreshAfterIndexWrite(_ repository: GitRepository) async throws {
         let start = Date(), state = try await repository.snapshot()
@@ -232,11 +256,12 @@ struct DiffPreview {
     func cancelRead() {
         if opening { openTask?.cancel(); opening = false }
         refreshTask?.cancel(); refreshing = false
+        debounceTask?.cancel(); resetManualRefresh()
         if loadingDiff { diffTask?.cancel(); loadingDiff = false; diffError = "读取已取消，可点击重试。" }
     }
     func revealFile() {
         guard let snapshot, let selected else { return }
         NSWorkspace.shared.activateFileViewerSelecting([snapshot.root.appendingPathComponent(selected.path)])
     }
-    func stop() { operationTask?.cancel(); openTask?.cancel(); refreshTask?.cancel(); diffTask?.cancel(); debounceTask?.cancel(); watcher?.stop() }
+    func stop() { operationTask?.cancel(); openTask?.cancel(); refreshTask?.cancel(); diffTask?.cancel(); debounceTask?.cancel(); watcher?.stop(); resetManualRefresh() }
 }

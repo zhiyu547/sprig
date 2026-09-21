@@ -6,10 +6,10 @@ import AppKit
 import GitCore
 
 enum Palette {
-    static let codeNS = NSColor(srgbRed: 0.095, green: 0.11, blue: 0.125, alpha: 1)
+    static let codeNS = NSColor(srgbRed: 0.09, green: 0.105, blue: 0.12, alpha: 1)
     static let code = Color(nsColor: codeNS)
     static let sidebar = Color(red: 0.125, green: 0.14, blue: 0.16)
-    static let toolbar = Color(red: 0.14, green: 0.16, blue: 0.19)
+    static let toolbar = Color(red: 0.14, green: 0.16, blue: 0.18)
     static let border = Color.white.opacity(0.09)
     static let blue = Color(red: 0.30, green: 0.55, blue: 0.98)
     static let mint = Color(red: 0.55, green: 0.85, blue: 0.69)
@@ -39,10 +39,9 @@ struct WorkspaceView: View {
     @ObservedObject var store: RepositoryStore
     var body: some View {
         VStack(spacing: 0) {
-            header
+            WorkspaceHeader(store: store)
             if store.opening { ProgressView("正在读取仓库…").frame(maxWidth: .infinity, maxHeight: .infinity) }
             else if store.snapshot != nil {
-                pageBar
                 switch store.page {
                 case .changes: NativeSplitView { ChangeSidebar(store: store) } right: { LiveDiffPane(store: store) }
                 case .history: NativeSplitView { HistorySidebar(store: store) } right: { HistoryDetails(store: store) }
@@ -71,73 +70,6 @@ struct WorkspaceView: View {
                 }; return true
             }
     }
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).frame(width: 30, height: 30).accessibilityHidden(true)
-            HStack(spacing: 8) {
-                Menu {
-                    Button("打开仓库…", action: store.chooseRepository)
-                    if !store.recent.isEmpty {
-                        Divider()
-                        ForEach(store.recent, id: \.self) { path in
-                            Button(visiblePath(path)) { store.open(URL(fileURLWithPath: path)) }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "folder").foregroundStyle(.secondary)
-                        Text(store.snapshot?.root.lastPathComponent ?? "Sprig").font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180)
-                    }
-                }.menuStyle(.borderlessButton).menuIndicator(.visible).fixedSize()
-                    .modifier(ControlSurface(tone: .subtle, height: 34))
-                    .help("切换或打开仓库").accessibilityLabel("仓库选择")
-                if store.snapshot != nil {
-                    Button { store.loadAuxiliary(); store.showBranches.toggle() } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.triangle.branch").foregroundStyle(Palette.blue)
-                            Text(store.branchTitle).lineLimit(1).truncationMode(.middle).frame(maxWidth: 160)
-                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-                        }
-                    }.buttonStyle(SprigButtonStyle(tone: store.showBranches ? .selected : .subtle, height: 34)).fixedSize()
-                        .help("查看、创建与切换分支").accessibilityLabel("当前分支：" + store.branchTitle)
-                        .popover(isPresented: $store.showBranches) { BranchPopover(store: store) }
-                }
-            }.disabled(store.blockingBusy).allowsHitTesting(!store.busy)
-            Spacer(minLength: 12)
-            HStack(spacing: 4) {
-                if store.snapshot != nil {
-                    ToolbarIconButton(title: "获取远端更新", symbol: "arrow.down.to.line", tooltip: "获取远端更新 · Fetch") {
-                        store.runOperation("获取远端更新") { try await $0.fetch() }
-                    }
-                    ToolbarIconButton(title: "快进拉取", symbol: "arrow.down", tooltip: "更新项目：快进拉取 · Pull") {
-                        store.runOperation("快进拉取") { try await $0.pull() }
-                    }
-                    Button(action: store.openPush) { Label("推送", systemImage: "arrow.up") }
-                        .buttonStyle(SprigButtonStyle(tone: .subtle)).help("推送当前提交")
-                    Rectangle().fill(Palette.border).frame(width: 1, height: 18).padding(.horizontal, 7)
-                }
-                ToolbarIconButton(title: "设置", symbol: "gearshape", tooltip: "设置 · ⌘,") {
-                    store.sheet = WorkspaceSheet(kind: .settings)
-                }
-                ToolbarIconButton(title: "打开仓库", symbol: "folder.badge.plus", tooltip: "打开仓库 · ⌘O", action: store.chooseRepository)
-            }.disabled(store.blockingBusy).allowsHitTesting(!store.busy)
-        }.padding(.horizontal, 16).frame(height: 58).background(Palette.toolbar)
-    }
-    private var pageBar: some View {
-        HStack {
-            Picker("工作区页面", selection: $store.page) { ForEach(WorkspacePage.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).frame(width: 295)
-            Spacer()
-            if store.blockingBusy {
-                ProgressView().controlSize(.small); Text(store.busyTitle).font(.system(size: 11)).foregroundStyle(.secondary)
-                if let start = store.aiStartedAt {
-                    TimelineView(.periodic(from: start, by: 1)) { context in Text("\(Int(context.date.timeIntervalSince(start))) 秒").monospacedDigit().font(.system(size: 11)).foregroundStyle(.secondary) }
-                    Button("取消", action: store.cancelAI).controlSize(.small)
-                }
-            }
-            if store.updatingIndex { DelayedActivity(label: store.busyTitle).id(store.busyTitle) }
-            if store.pendingPushOID != nil && store.synchronizedPushSession == nil && !store.busy { Button("继续推送", action: store.retryPush).controlSize(.small).tint(.orange).help("仅重试推送，不重复提交") }
-        }.padding(.horizontal, 12).frame(height: 38).background(Palette.sidebar).overlay(alignment: .bottom) { Divider() }
-    }
     private func banner(_ value: String, failed: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: failed ? "exclamationmark.triangle" : "checkmark.circle").foregroundStyle(failed ? .orange : Palette.mint)
@@ -165,7 +97,11 @@ struct WorkspaceView: View {
     }
     private var footer: some View {
         HStack(spacing: 12) {
-            Label(store.watching ? "自动刷新" : "手动刷新", systemImage: "dot.radiowaves.left.and.right")
+            HStack(spacing: 6) {
+                Image(systemName: "circle.fill").font(.system(size: 6)).foregroundStyle(store.watching ? Palette.mint : .secondary)
+                Text(store.watching ? "自动刷新" : "手动刷新")
+            }
+            WorkspaceActivity(store: store)
             if let session = store.synchronizedPushSession {
                 Text(session.status).foregroundStyle(.orange).lineLimit(1)
                 Button(session.needsRestoreReview ? "恢复已核对，继续" : "继续同步并推送", action: store.retryPush).disabled(store.busy)
@@ -178,7 +114,7 @@ struct WorkspaceView: View {
             Spacer()
             if let upstream = store.snapshot?.upstream { Text("\(upstream)  ↑\(store.snapshot?.ahead ?? 0) ↓\(store.snapshot?.behind ?? 0)").lineLimit(1).help("本地已知远端状态，点击 Fetch 更新") }
             if let date = store.updatedAt { Text("\(date.formatted(date: .omitted, time: .standard)) · \(store.refreshMilliseconds) ms") }
-        }.font(.system(size: 10)).foregroundStyle(.secondary).controlSize(.mini).padding(.horizontal, 12).frame(height: 28).overlay(alignment: .top) { Divider() }
+        }.font(.system(size: 10)).foregroundStyle(.secondary).controlSize(.mini).padding(.horizontal, 16).frame(height: 28).background(Palette.sidebar.opacity(0.5)).overlay(alignment: .top) { Divider() }
     }
     private var console: some View {
         ScrollView {
@@ -201,8 +137,18 @@ struct ChangeSidebar: View {
         CommitSplitView {
             VStack(spacing: 0) {
                 toolbar
-                HStack { Image(systemName: "magnifyingglass").foregroundStyle(.secondary); TextField("搜索更改文件", text: $store.query).textFieldStyle(.plain); if !store.query.isEmpty { Button { store.query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) } }.font(.system(size: 12)).padding(8).background(Color.black.opacity(0.13), in: RoundedRectangle(cornerRadius: 5)).padding(.horizontal, 10)
-                Picker("文件筛选", selection: $store.filter) { Text("全部").tag("all"); Text("已暂存").tag("staged"); Text("工作区").tag("working") }.pickerStyle(.segmented).labelsHidden().padding(10)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("搜索更改文件", text: $store.query).textFieldStyle(.plain).accessibilityLabel("搜索更改文件")
+                    if !store.query.isEmpty {
+                        Button { store.query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).help("清除搜索").accessibilityLabel("清除搜索")
+                    }
+                }.font(.system(size: 12)).padding(.horizontal, 10).frame(height: 32)
+                    .background(Palette.code.opacity(0.65), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Palette.border)).padding(.horizontal, 12)
+                SelectionStrip(selection: $store.filter, options: [("全部", "all"), ("已暂存", "staged"), ("工作区", "working")])
+                    .accessibilityLabel("文件筛选").padding(12)
                 ScrollView {
                     LazyVStack(spacing: 4) {
                         group("更改", files: store.changedFiles, expanded: $store.trackedExpanded)
@@ -210,7 +156,7 @@ struct ChangeSidebar: View {
                             group("未进行版本管理的文件", files: store.newFiles, expanded: $store.untrackedExpanded)
                         }
                         if store.files.isEmpty { Text(store.snapshot?.files.isEmpty == true ? "工作区干净" : "没有匹配文件").font(.system(size: 12)).foregroundStyle(.secondary).padding(20) }
-                    }.padding(.horizontal, 7).padding(.bottom, 10)
+                    }.padding(.horizontal, 8).padding(.bottom, 10)
                 }.frame(maxHeight: .infinity)
             }.background(Palette.sidebar)
         } editor: {
@@ -218,42 +164,62 @@ struct ChangeSidebar: View {
         }.background(Palette.sidebar)
     }
     private var toolbar: some View {
-        HStack(spacing: 10) {
-            tool("arrow.triangle.2.circlepath", "刷新 · ⌘R", action: store.refresh)
-            tool("arrow.uturn.backward", "恢复当前文件未暂存的修改", action: store.discardSelected).disabled(store.selected == nil || store.selected?.hasWorking != true || store.selected?.untracked == true)
-            Menu { if let selected = store.selected { Button("暂存当前文件全部修改") { store.stageFiles([selected]) }; Button("取消暂存当前文件") { store.unstageFiles([selected]) } }; Button("暂存所有更改") { store.stageFiles(store.files.filter { !$0.untracked }) }; Button("取消全部暂存") { store.unstageFiles(store.snapshot?.files.filter(\.hasStaged) ?? []) } } label: { Image(systemName: "arrow.left.arrow.right") }.menuStyle(.borderlessButton).frame(width: 20).help("调整暂存范围")
-            tool("archivebox", "储藏当前修改") { store.sheet = WorkspaceSheet(kind: .stash) }
-            tool(store.showDiff ? "eye" : "eye.slash", "显示／隐藏 Diff") { store.showDiff.toggle() }
-            tool("scope", "在 Finder 中定位当前文件", action: store.revealFile).disabled(store.selected == nil)
-            tool("arrow.up.left.and.arrow.down.right", "展开所有分组") { store.trackedExpanded = true; store.untrackedExpanded = true }
-            tool("arrow.down.right.and.arrow.up.left", "折叠所有分组") { store.trackedExpanded = false; store.untrackedExpanded = false }
-            Spacer(minLength: 0)
-        }.font(.system(size: 14)).padding(.horizontal, 13).frame(height: 40).disabled(store.blockingBusy).allowsHitTesting(!store.busy)
+        GeometryReader { geometry in
+            HStack(spacing: 2) {
+                RefreshControl(store: store, showLabel: geometry.size.width >= 320)
+                Rectangle().fill(Palette.border).frame(width: 1, height: 16).padding(.horizontal, 4)
+                ToolbarIconButton(title: "恢复当前文件未暂存的修改", symbol: "arrow.uturn.backward", size: 28, action: store.discardSelected)
+                    .disabled(store.selected == nil || store.selected?.hasWorking != true || store.selected?.untracked == true)
+                Menu {
+                    if let selected = store.selected {
+                        Button("暂存当前文件全部修改") { store.stageFiles([selected]) }
+                        Button("取消暂存当前文件") { store.unstageFiles([selected]) }
+                        Divider()
+                    }
+                    Button("暂存所有更改") { store.stageFiles(store.files.filter { !$0.untracked }) }
+                    Button("取消全部暂存") { store.unstageFiles(store.snapshot?.files.filter(\.hasStaged) ?? []) }
+                } label: { Image(systemName: "arrow.down.to.line").frame(width: 28, height: 28).contentShape(Rectangle()) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .modifier(ControlSurface(tone: .quiet, height: 28, horizontalPadding: 0))
+                    .help("调整暂存范围").accessibilityLabel("调整暂存范围")
+                ToolbarIconButton(title: "储藏当前修改", symbol: "archivebox", size: 28) { store.sheet = WorkspaceSheet(kind: .stash) }
+                ToolbarIconButton(title: "显示／隐藏 Diff", symbol: store.showDiff ? "eye" : "eye.slash", size: 28) { store.showDiff.toggle() }
+                Spacer(minLength: 0)
+                Menu {
+                    Button("在 Finder 中定位当前文件", action: store.revealFile).disabled(store.selected == nil)
+                    Divider()
+                    Button("展开所有分组") { store.trackedExpanded = true; store.untrackedExpanded = true }
+                    Button("折叠所有分组") { store.trackedExpanded = false; store.untrackedExpanded = false }
+                } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle()) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .modifier(ControlSurface(tone: .quiet, height: 28, horizontalPadding: 0))
+                    .help("更多文件操作").accessibilityLabel("更多文件操作")
+            }.padding(.horizontal, 10).frame(height: 46).disabled(store.blockingBusy).allowsHitTesting(!store.busy)
+        }.frame(height: 46)
     }
-    private func tool(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View { Button(action: action) { Image(systemName: symbol).frame(width: 17, height: 25) }.buttonStyle(.plain).help(help) }
     private func group(_ title: String, files: [ChangedFile], expanded: Binding<Bool>) -> some View {
         VStack(spacing: 3) {
             // Adjacent hit regions keep staging separate from disclosure.
             HStack(spacing: 0) {
                 Button { expanded.wrappedValue.toggle() } label: {
                     Image(systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right")
-                        .frame(width: 28, height: 31).contentShape(Rectangle())
+                        .frame(width: 28, height: 32).contentShape(Rectangle())
                 }.buttonStyle(.plain).help("展开或折叠 " + title)
                     .accessibilityLabel("展开或折叠 " + title)
                     .accessibilityValue(expanded.wrappedValue ? "已展开" : "已折叠")
                 Button { store.toggleGroup(files) } label: {
                     Image(systemName: !files.isEmpty && files.allSatisfy(\.hasStaged) ? "checkmark.square.fill" : files.contains(where: \.hasStaged) ? "minus.square.fill" : "square")
                         .font(.system(size: 16)).foregroundStyle(files.contains(where: \.hasStaged) ? Palette.blue : .secondary)
-                        .frame(width: 22, height: 31).contentShape(Rectangle())
+                        .frame(width: 22, height: 32).contentShape(Rectangle())
                 }.buttonStyle(.plain).disabled(store.blockingBusy || files.isEmpty).allowsHitTesting(!store.busy)
                     .help("暂存或取消暂存此组文件").accessibilityLabel("暂存或取消暂存 " + title)
                 Button { expanded.wrappedValue.toggle() } label: {
                     HStack(spacing: 7) {
-                        Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                        Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                         Text("\(files.count)").font(.system(size: 11)).foregroundStyle(.secondary)
                         Spacer(minLength: 0)
                     }.padding(.leading, 3).padding(.trailing, 8)
-                        .frame(maxWidth: .infinity).frame(height: 31).contentShape(Rectangle())
+                        .frame(maxWidth: .infinity).frame(height: 32).contentShape(Rectangle())
                 }.buttonStyle(.plain).help("展开或折叠 " + title)
                     .accessibilityLabel(title + "，\(files.count) 个文件")
                     .accessibilityValue(expanded.wrappedValue ? "已展开" : "已折叠")
@@ -262,15 +228,15 @@ struct ChangeSidebar: View {
         }
     }
     private func row(_ file: ChangedFile) -> some View {
-        HStack(spacing: 7) {
-            Button { store.toggleStage(file) } label: { Image(systemName: file.conflict ? "exclamationmark.triangle" : file.hasStaged && file.hasWorking ? "minus.square.fill" : file.hasStaged ? "checkmark.square.fill" : "square").font(.system(size: 16)).foregroundStyle(file.conflict ? .orange : file.hasStaged ? Palette.blue : .secondary) }.buttonStyle(.plain).disabled(store.blockingBusy || file.conflict).allowsHitTesting(!store.busy).help(file.hasStaged ? "取消暂存 " + file.path : "暂存 " + file.path)
+        HStack(spacing: 5) {
+            Button { store.toggleStage(file) } label: { Image(systemName: file.conflict ? "exclamationmark.triangle" : file.hasStaged && file.hasWorking ? "minus.square.fill" : file.hasStaged ? "checkmark.square.fill" : "square").font(.system(size: 16)).foregroundStyle(file.conflict ? .orange : file.hasStaged ? Palette.blue : .secondary).frame(width: 24, height: 40).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel((file.hasStaged ? "取消暂存 " : "暂存 ") + file.name).disabled(store.blockingBusy || file.conflict).allowsHitTesting(!store.busy).help(file.hasStaged ? "取消暂存 " + file.path : "暂存 " + file.path)
             Button { store.select(file) } label: {
                 HStack(spacing: 6) {
-                    VStack(alignment: .leading, spacing: 3) { Text(visiblePath(file.name)).font(.system(size: 12, weight: .medium)).foregroundStyle(file.isNewFile ? Palette.newFile : .primary).lineLimit(1).truncationMode(.middle); Text(visiblePath(file.parent)).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) }
-                    Spacer(minLength: 0); Text(file.hasStaged && file.hasWorking ? "部分" : file.badge).font(.system(size: 10)).foregroundStyle(file.conflict ? .orange : file.isNewFile ? Palette.newFile : Palette.blue)
+                    VStack(alignment: .leading, spacing: 3) { Text(visiblePath(file.name)).font(.system(size: 13, weight: .medium)).foregroundStyle(file.isNewFile ? Palette.newFile : .primary).lineLimit(1).truncationMode(.middle); Text(visiblePath(file.parent)).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1) }
+                    Spacer(minLength: 0); Text(file.hasStaged && file.hasWorking ? "部分" : file.badge).font(.system(size: 11)).foregroundStyle(file.conflict ? .orange : file.isNewFile ? Palette.newFile : Palette.blue)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).help(visiblePath(file.path) + " · " + file.scopeLabel)
-        }.padding(.leading, 24).padding(.trailing, 8).frame(height: 42).background(store.selectedPath == file.path ? Palette.blue.opacity(0.23) : .clear, in: RoundedRectangle(cornerRadius: 5))
+        }.padding(.leading, 24).padding(.trailing, 12).frame(height: 46).background(store.selectedPath == file.path ? Palette.blue.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 5))
             .contextMenu {
                 Button("查看差异") { store.select(file) }
                 if file.conflict { Button("标记为已解决…") { store.markResolved(file) }.disabled(store.busy) }
@@ -287,35 +253,56 @@ struct CommitEditor: View {
     var body: some View {
         VStack(spacing: 10) {
             HStack(spacing: 5) {
-                Toggle("修正", isOn: $store.amend).toggleStyle(.checkbox).help("修正上次提交，创建新的提交 ID")
-                Button("上次提交", action: store.loadPreviousMessage).buttonStyle(.plain).foregroundStyle(Palette.blue).help("载入上次提交说明")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        Text("提交说明").fontWeight(.semibold).fixedSize()
+                        amendControls
+                    }.fixedSize()
+                    amendControls.fixedSize()
+                }
                 Spacer(minLength: 2)
-                ToolbarIconButton(title: "AI 生成提交说明", symbol: "sparkles", tone: .accent, size: 28, tooltip: "AI 生成提交说明 · 基于已暂存内容") {
+                ToolbarIconButton(title: "AI 生成提交说明", symbol: "sparkles", tone: .accent, size: 30, tooltip: "AI 生成提交说明 · 基于已暂存内容") {
                     store.prepareAI(.commit)
                 }.accessibilityIdentifier("commit.generateAI")
-                Menu {
-                    ForEach(Array(store.messageHistory.enumerated()), id: \.offset) { _, message in
-                        Button(String(message.split(separator: "\n").first ?? "")) { store.commitMessage = message }
-                    }
-                } label: {
-                    Image(systemName: "clock.arrow.circlepath").font(.system(size: 13))
-                }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28)
-                    .modifier(ControlSurface(tone: .quiet, height: 28, horizontalPadding: 0))
-                    .help("提交说明历史").accessibilityLabel("提交说明历史")
-                ToolbarIconButton(title: "提交设置", symbol: "gearshape", size: 28) {
-                    store.sheet = WorkspaceSheet(kind: .settings)
-                }
+                messageHistory
+                ToolbarIconButton(title: "提交设置", symbol: "gearshape", size: 28) { store.sheet = WorkspaceSheet(kind: .settings) }
             }.font(.system(size: 11))
-            ZStack(alignment: .topLeading) {
-                if store.commitMessage.isEmpty {
-                    Text("提交摘要\n\n描述本次变更的内容与原因…").font(.system(size: 12)).foregroundStyle(.tertiary).padding(9).allowsHitTesting(false)
-                }
-                TextEditor(text: $store.commitMessage).font(.system(size: 12, design: .monospaced)).scrollContentBackground(.hidden).padding(5).accessibilityLabel("提交说明")
-            }.background(Palette.code, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.border)).frame(minHeight: 96, maxHeight: .infinity)
+            editorField
+            commitActions
+        }.padding(12).frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Palette.code.opacity(0.25)).disabled(store.blockingBusy).allowsHitTesting(!store.busy)
+    }
+    private var amendControls: some View {
+        HStack(spacing: 7) {
+            Toggle("修正", isOn: $store.amend).toggleStyle(.checkbox).help("修正上次提交，创建新的提交 ID")
+            Button("上次提交", action: store.loadPreviousMessage).buttonStyle(.plain).foregroundStyle(Palette.blue).help("载入上次提交说明")
+        }
+    }
+    private var messageHistory: some View {
+        Menu {
+            ForEach(Array(store.messageHistory.enumerated()), id: \.offset) { _, message in
+                Button(String(message.split(separator: "\n").first ?? "")) { store.commitMessage = message }
+            }
+        } label: {
+            Image(systemName: "clock.arrow.circlepath").font(.system(size: 13))
+        }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28)
+            .modifier(ControlSurface(tone: .quiet, height: 28, horizontalPadding: 0))
+            .help("提交说明历史").accessibilityLabel("提交说明历史")
+    }
+    private var editorField: some View {
+        ZStack(alignment: .topLeading) {
+            if store.commitMessage.isEmpty {
+                Text("提交摘要\n\n描述本次变更的内容与原因…").font(.system(size: 12)).foregroundStyle(.tertiary).padding(9).allowsHitTesting(false)
+            }
+            TextEditor(text: $store.commitMessage).font(.system(size: 13, design: .monospaced)).scrollContentBackground(.hidden).padding(5).accessibilityLabel("提交说明")
+        }.background(Palette.code, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Palette.border)).frame(minHeight: 96, maxHeight: .infinity)
+    }
+    private var commitActions: some View {
+        VStack(spacing: 8) {
             HStack {
                 Label("\(store.snapshot?.stagedCount ?? 0) 个文件已暂存", systemImage: "checkmark.circle")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer(minLength: 4)
                 Menu {
                     Button("本地提交检查", action: store.localChecks)
@@ -331,14 +318,13 @@ struct CommitEditor: View {
             HStack(spacing: 8) {
                 Button { store.prepareCommit(push: false) } label: {
                     Label("提交", systemImage: "checkmark").frame(maxWidth: .infinity)
-                }.buttonStyle(SprigButtonStyle(tone: .primary, height: 34)).help("提交已暂存内容 · ⌘K")
+                }.buttonStyle(SprigButtonStyle(tone: .primary, height: 36)).help("提交已暂存内容 · ⌘K")
                 Button { store.prepareCommit(push: true) } label: {
                     Label("提交并推送…", systemImage: "arrow.up").lineLimit(1).frame(maxWidth: .infinity)
-                }.buttonStyle(SprigButtonStyle(tone: .subtle, height: 34)).help("提交后推送到远端 · ⇧⌘K")
+                }.buttonStyle(SprigButtonStyle(tone: .subtle, height: 36)).help("提交后推送到远端 · ⇧⌘K")
             }.disabled(!store.hasCommitContent || store.blockingBusy)
             Text(store.aiSource == nil ? "勾选文件加入暂存区 · 仅提交已暂存内容" : "AI 草稿基于生成时的暂存快照，请确认范围").font(.system(size: 9)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(12).frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Palette.code.opacity(0.4)).disabled(store.blockingBusy).allowsHitTesting(!store.busy)
+        }
     }
 }
 
@@ -379,12 +365,14 @@ struct LiveDiffPane: View {
                     DiffModeControl(split: $store.split).padding(.leading, 4)
                 }.padding(16)
                 HStack(spacing: 9) {
-                    Picker("差异范围", selection: Binding(get: { store.previewScope }, set: store.changeScope)) { Text("已暂存").tag(DiffScope.staged); Text("工作区").tag(DiffScope.working) }.pickerStyle(.segmented).frame(width: 160)
+                    Text("差异范围").foregroundStyle(.secondary)
+                    SelectionStrip(selection: Binding(get: { store.previewScope }, set: store.changeScope), options: [("已暂存", DiffScope.staged), ("工作区", DiffScope.working)])
+                        .frame(width: 150).accessibilityLabel("差异范围")
                     Text(file.scopeLabel).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
-                    if let document = store.document { Text("+\(document.additions)").foregroundStyle(.green); Text("−\(document.deletions)").foregroundStyle(.red) }
+                    if let document = store.document { Text("+\(document.additions)").foregroundStyle(Palette.mint); Text("−\(document.deletions)").foregroundStyle(Palette.newFile) }
                     Menu { Button("上一个变更块") { store.navigateHunk(-1) }; Button("下一个变更块") { store.navigateHunk(1) }; Divider(); Button("复制 Diff") { copyText(store.document?.raw ?? "") }; Button("导出补丁…", action: store.exportPatch); Button("在 Finder 中显示", action: store.revealFile) } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
-                }.font(.system(size: 10)).padding(.horizontal, 16).padding(.bottom, 10)
+                }.font(.system(size: 11)).padding(.horizontal, 16).padding(.bottom, 10)
                 if !store.showDiff { VStack(spacing: 12) { Text("差异预览已隐藏"); Button("显示差异") { store.showDiff = true } }.frame(maxWidth: .infinity, maxHeight: .infinity) }
                 else {
                     DocumentPane(document: store.document, identity: store.documentIdentity, leftLabel: store.previewScope == .staged ? "HEAD" : "暂存区", rightLabel: store.previewScope == .staged ? "暂存区" : "工作区", split: $store.split)

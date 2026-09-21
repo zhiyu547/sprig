@@ -39,7 +39,7 @@ struct DiffTable: NSViewRepresentable {
         scroll.backgroundColor = Palette.codeNS; scroll.drawsBackground = true
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("code"))
         column.minWidth = 100; column.maxWidth = 30_000; column.resizingMask = .autoresizingMask
-        table.addTableColumn(column); table.headerView = nil; table.rowHeight = 23; table.intercellSpacing = .zero
+        table.addTableColumn(column); table.headerView = nil; table.rowHeight = 24; table.intercellSpacing = .zero
         table.backgroundColor = Palette.codeNS; table.selectionHighlightStyle = .none
         table.delegate = context.coordinator; table.dataSource = context.coordinator
         table.columnAutoresizingStyle = .noColumnAutoresizing
@@ -57,7 +57,7 @@ struct DiffTable: NSViewRepresentable {
         guard changedFile || coordinator.revision != revision else { coordinator.resize(); return }
         let position = scroll.contentView.bounds.origin
         coordinator.identity = identity; coordinator.revision = revision; coordinator.lines = lines; coordinator.side = side
-        coordinator.longest = min(20_000, CGFloat(lines.compactMap { $0?.text.count }.max() ?? 0) * 8 + 96)
+        coordinator.longest = min(20_000, CGFloat(lines.compactMap { $0?.text.count }.max() ?? 0) * 8.5 + 96)
         coordinator.resize(); coordinator.table?.reloadData()
         let next = changedFile ? NSPoint.zero : NSPoint(
             x: min(position.x, max(0, (coordinator.table?.bounds.width ?? 0) - scroll.contentSize.width)),
@@ -75,11 +75,11 @@ struct DiffTable: NSViewRepresentable {
         private var resizing = false
         func navigateHunk(_ direction: Int) {
             guard side != "right", let table, let scroll = table.enclosingScrollView, table.window != nil else { return }
-            let top = Int(scroll.contentView.bounds.minY / 23)
+            let top = Int(scroll.contentView.bounds.minY / 24)
             let hunks = lines.indices.filter { lines[$0]?.kind == .hunk }
             let target = direction > 0 ? hunks.first(where: { $0 > top }) : hunks.last(where: { $0 < top })
             guard let target else { return }
-            let y = min(CGFloat(target) * 23, max(0, table.bounds.height - scroll.contentSize.height))
+            let y = min(CGFloat(target) * 24, max(0, table.bounds.height - scroll.contentSize.height))
             scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.minX, y: y)); scroll.reflectScrolledClipView(scroll.contentView)
         }
         func numberOfRows(in tableView: NSTableView) -> Int { lines.count }
@@ -100,7 +100,7 @@ struct DiffTable: NSViewRepresentable {
             resizing = true; defer { resizing = false }
             let width = max(scroll.contentSize.width, longest)
             if let column = table.tableColumns.first, abs(column.width - width) > 0.5 { column.width = width }
-            let size = NSSize(width: width, height: max(scroll.contentSize.height, CGFloat(lines.count) * 23))
+            let size = NSSize(width: width, height: max(scroll.contentSize.height, CGFloat(lines.count) * 24))
             if table.frame.size != size { table.setFrameSize(size) }
         }
         deinit { if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }; if let hunkObserver { NotificationCenter.default.removeObserver(hunkObserver) } }
@@ -111,11 +111,11 @@ private final class CodeCell: NSView {
     var line: DiffLine?
     var side = ""
     override var isFlipped: Bool { true }
-    private static let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    private static let codeFont = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
     private static let keyword = try! NSRegularExpression(pattern: "\\b(public|private|class|final|return|if|else|func|let|var|import|void|null|true|false|const|function|new)\\b|//.*$|#[^\\n]*$|\"[^\"]*\"")
     override func draw(_ dirtyRect: NSRect) {
         let background: NSColor
-        switch line?.kind { case .addition: background = NSColor(srgbRed: 0.09, green: 0.22, blue: 0.16, alpha: 1); case .deletion: background = NSColor(srgbRed: 0.23, green: 0.13, blue: 0.15, alpha: 1); case .hunk: background = NSColor(srgbRed: 0.14, green: 0.17, blue: 0.21, alpha: 1); default: background = Palette.codeNS }
+        switch line?.kind { case .addition: background = NSColor(srgbRed: 0.09, green: 0.20, blue: 0.155, alpha: 1); case .deletion: background = NSColor(srgbRed: 0.23, green: 0.13, blue: 0.15, alpha: 1); case .hunk: background = NSColor(srgbRed: 0.135, green: 0.155, blue: 0.19, alpha: 1); default: background = Palette.codeNS }
         background.setFill(); bounds.fill()
         guard let line else { return }
         let number = side == "left" ? line.old : line.new ?? line.old
@@ -132,7 +132,7 @@ private final class CodeCell: NSView {
             let range = NSRange(location: 0, length: string.length)
             for match in Self.keyword.matches(in: display, range: range) {
                 let token = (display as NSString).substring(with: match.range)
-                let color: NSColor = token.hasPrefix("//") || token.hasPrefix("#") ? .secondaryLabelColor : token.hasPrefix("\"") ? .systemGreen : .systemBlue
+                let color: NSColor = token.hasPrefix("//") || token.hasPrefix("#") ? .secondaryLabelColor : token.hasPrefix("\"") ? NSColor(srgbRed: 0.62, green: 0.80, blue: 0.65, alpha: 1) : NSColor(srgbRed: 0.38, green: 0.65, blue: 0.96, alpha: 1)
                 string.addAttribute(.foregroundColor, value: color, range: match.range)
             }
         }

@@ -58,7 +58,7 @@ import SwiftUI
     @objc private func commit() { store.prepareCommit(push: false) }
     @objc private func commitPush() { store.prepareCommit(push: true) }
     @objc private func history() { store.page = .history }
-    @objc private func refresh() { store.refresh() }
+    @objc private func refresh() { store.manualRefresh() }
     @objc private func widenCode() { NotificationCenter.default.post(name: .gitToolAdjustSidebar, object: Double(-24)) }
     @objc private func widenSidebar() { NotificationCenter.default.post(name: .gitToolAdjustSidebar, object: Double(24)) }
     @objc private func resetSidebar() { NotificationCenter.default.post(name: .gitToolAdjustSidebar, object: Double(0)) }
@@ -105,9 +105,9 @@ extension AppDelegate: NSMenuItemValidation {
 
 final class WorkspaceWindow: NSWindow {
     init(store: RepositoryStore) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 780), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 826), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         title = "Sprig"; minSize = NSSize(width: 940, height: 680)
-        titlebarAppearsTransparent = true; backgroundColor = NSColor(srgbRed: 0.14, green: 0.16, blue: 0.19, alpha: 1)
+        titlebarAppearsTransparent = true; backgroundColor = NSColor(srgbRed: 0.14, green: 0.16, blue: 0.18, alpha: 1)
         appearance = NSAppearance(named: .darkAqua)
         let content = NSHostingView(rootView: WorkspaceView(store: store))
         // Window geometry belongs to the user, not the current diff's intrinsic size.
