@@ -35,6 +35,8 @@
 
 Use the AI icon above the composer, review the outgoing file list and diff, then generate a message or request a code review. Connect a Chat Completions-compatible service or local Ollama. API keys stay in macOS Keychain.
 
+Large changes are handled in batches: Sprig accepts up to 2 MB of filtered staged diffs, analyzes bounded parts, and synthesizes a concise commit message. Preview every part before sending, follow progress, and cancel at any time. Batching uses more AI requests; a failed request preserves your existing draft.
+
 Example message format:
 
 ```text
