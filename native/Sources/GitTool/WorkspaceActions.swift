@@ -25,8 +25,8 @@ enum SheetKind {
 struct OperationLog: Identifiable { let id = UUID(); let date = Date(); let title: String; let output: String; let failed: Bool }
 
 extension RepositoryStore {
-    var trackedFiles: [ChangedFile] { files.filter { !$0.untracked } }
-    var untrackedFiles: [ChangedFile] { files.filter(\.untracked) }
+    var changedFiles: [ChangedFile] { files.filter { !$0.isNewFile } }
+    var newFiles: [ChangedFile] { files.filter(\.isNewFile) }
     var hasCommitContent: Bool { synchronizedPushSession == nil && snapshot != nil && ((snapshot?.stagedCount ?? 0) > 0 || amend) && !(snapshot?.files.contains(where: \.conflict) ?? false) && snapshot?.operation == nil }
     var canCommit: Bool { !busy && hasCommitContent }
     func draftKey(_ path: String) -> String { "Sprig.draft." + SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined() }

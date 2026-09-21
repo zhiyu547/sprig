@@ -13,6 +13,7 @@ enum Palette {
     static let border = Color.white.opacity(0.09)
     static let blue = Color(red: 0.30, green: 0.55, blue: 0.98)
     static let mint = Color(red: 0.55, green: 0.85, blue: 0.69)
+    static let newFile = Color(red: 0.96, green: 0.54, blue: 0.52)
 }
 func visiblePath(_ value: String) -> String { value.replacingOccurrences(of: "\n", with: "↵").replacingOccurrences(of: "\t", with: "⇥") }
 func copyText(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
@@ -204,9 +205,9 @@ struct ChangeSidebar: View {
                 Picker("文件筛选", selection: $store.filter) { Text("全部").tag("all"); Text("已暂存").tag("staged"); Text("工作区").tag("working") }.pickerStyle(.segmented).labelsHidden().padding(10)
                 ScrollView {
                     LazyVStack(spacing: 4) {
-                        group("更改", files: store.trackedFiles, expanded: $store.trackedExpanded)
-                        if !store.untrackedFiles.isEmpty {
-                            group("未进行版本管理的文件", files: store.untrackedFiles, expanded: $store.untrackedExpanded)
+                        group("更改", files: store.changedFiles, expanded: $store.trackedExpanded)
+                        if !store.newFiles.isEmpty {
+                            group("未进行版本管理的文件", files: store.newFiles, expanded: $store.untrackedExpanded)
                         }
                         if store.files.isEmpty { Text(store.snapshot?.files.isEmpty == true ? "工作区干净" : "没有匹配文件").font(.system(size: 12)).foregroundStyle(.secondary).padding(20) }
                     }.padding(.horizontal, 7).padding(.bottom, 10)
@@ -220,7 +221,7 @@ struct ChangeSidebar: View {
         HStack(spacing: 10) {
             tool("arrow.triangle.2.circlepath", "刷新 · ⌘R", action: store.refresh)
             tool("arrow.uturn.backward", "恢复当前文件未暂存的修改", action: store.discardSelected).disabled(store.selected == nil || store.selected?.hasWorking != true || store.selected?.untracked == true)
-            Menu { if let selected = store.selected { Button("暂存当前文件全部修改") { store.stageFiles([selected]) }; Button("取消暂存当前文件") { store.unstageFiles([selected]) } }; Button("暂存所有更改") { store.stageFiles(store.trackedFiles) }; Button("取消全部暂存") { store.unstageFiles(store.snapshot?.files.filter(\.hasStaged) ?? []) } } label: { Image(systemName: "arrow.left.arrow.right") }.menuStyle(.borderlessButton).frame(width: 20).help("调整暂存范围")
+            Menu { if let selected = store.selected { Button("暂存当前文件全部修改") { store.stageFiles([selected]) }; Button("取消暂存当前文件") { store.unstageFiles([selected]) } }; Button("暂存所有更改") { store.stageFiles(store.files.filter { !$0.untracked }) }; Button("取消全部暂存") { store.unstageFiles(store.snapshot?.files.filter(\.hasStaged) ?? []) } } label: { Image(systemName: "arrow.left.arrow.right") }.menuStyle(.borderlessButton).frame(width: 20).help("调整暂存范围")
             tool("archivebox", "储藏当前修改") { store.sheet = WorkspaceSheet(kind: .stash) }
             tool(store.showDiff ? "eye" : "eye.slash", "显示／隐藏 Diff") { store.showDiff.toggle() }
             tool("scope", "在 Finder 中定位当前文件", action: store.revealFile).disabled(store.selected == nil)
@@ -265,8 +266,8 @@ struct ChangeSidebar: View {
             Button { store.toggleStage(file) } label: { Image(systemName: file.conflict ? "exclamationmark.triangle" : file.hasStaged && file.hasWorking ? "minus.square.fill" : file.hasStaged ? "checkmark.square.fill" : "square").font(.system(size: 16)).foregroundStyle(file.conflict ? .orange : file.hasStaged ? Palette.blue : .secondary) }.buttonStyle(.plain).disabled(store.blockingBusy || file.conflict).allowsHitTesting(!store.busy).help(file.hasStaged ? "取消暂存 " + file.path : "暂存 " + file.path)
             Button { store.select(file) } label: {
                 HStack(spacing: 6) {
-                    VStack(alignment: .leading, spacing: 3) { Text(visiblePath(file.name)).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle); Text(visiblePath(file.parent)).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) }
-                    Spacer(minLength: 0); Text(file.hasStaged && file.hasWorking ? "部分" : file.badge).font(.system(size: 10)).foregroundStyle(file.conflict ? .orange : Palette.blue)
+                    VStack(alignment: .leading, spacing: 3) { Text(visiblePath(file.name)).font(.system(size: 12, weight: .medium)).foregroundStyle(file.isNewFile ? Palette.newFile : .primary).lineLimit(1).truncationMode(.middle); Text(visiblePath(file.parent)).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) }
+                    Spacer(minLength: 0); Text(file.hasStaged && file.hasWorking ? "部分" : file.badge).font(.system(size: 10)).foregroundStyle(file.conflict ? .orange : file.isNewFile ? Palette.newFile : Palette.blue)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).help(visiblePath(file.path) + " · " + file.scopeLabel)
         }.padding(.leading, 24).padding(.trailing, 8).frame(height: 42).background(store.selectedPath == file.path ? Palette.blue.opacity(0.23) : .clear, in: RoundedRectangle(cornerRadius: 5))

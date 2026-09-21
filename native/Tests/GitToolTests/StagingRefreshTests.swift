@@ -68,6 +68,82 @@ final class StagingRefreshTests: XCTestCase {
         while store.loadingDiff, Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
         XCTAssertFalse(store.loadingDiff); XCTAssertNil(store.diffError)
     }
+    @MainActor func testNewFilesStayInTheirGroupThroughStagingRefreshAndCommit() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sprig-new-files-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = RepositoryStore(), reopened = RepositoryStore()
+        defer { store.stop(); reopened.stop(); try? FileManager.default.removeItem(at: root) }
+        func write(_ path: String, _ text: String) throws { try Data(text.utf8).write(to: root.appendingPathComponent(path)) }
+        try git(root, ["init", "-b", "main"])
+        try git(root, ["config", "user.name", "Fixture"]); try git(root, ["config", "user.email", "fixture@example.invalid"])
+        try write("tracked.txt", "base\n"); try write("old.txt", "rename me\n")
+        try git(root, ["add", "."]); try git(root, ["commit", "-m", "base"])
+        try write("tracked.txt", "base\nedit\n"); try git(root, ["mv", "old.txt", "renamed.txt"])
+        try write("new-a.txt", "first new file\n"); try write("new-z.txt", "second new file\n")
+        let repo = try await GitRepository.open(root)
+        store.repository = repo; store.snapshot = try await repo.snapshot(); store.untrackedExpanded = true
+        let newPaths = ["new-a.txt", "new-z.txt"], changedPaths = ["renamed.txt", "tracked.txt"]
+        XCTAssertEqual(store.newFiles.map(\.path), newPaths)
+        XCTAssertEqual(store.changedFiles.map(\.path), changedPaths)
+        store.select(try XCTUnwrap(store.newFiles.first))
+        try await waitForDiff(store)
+        let patch = store.document?.raw
+
+        // Single check/uncheck keeps group, order, expansion and selected preview stable.
+        for staged in [true, false] {
+            store.toggleStage(try XCTUnwrap(store.selected)); await store.operationTask?.value
+            try await waitForDiff(store)
+            XCTAssertNil(store.error)
+            XCTAssertEqual(store.newFiles.map(\.path), newPaths)
+            XCTAssertEqual(store.changedFiles.map(\.path), changedPaths)
+            XCTAssertEqual(store.selectedPath, "new-a.txt"); XCTAssertTrue(store.untrackedExpanded)
+            XCTAssertEqual(store.selected?.hasStaged, staged)
+            XCTAssertEqual(store.selected?.untracked, !staged, "Keep the real Git status separate from the group")
+            XCTAssertEqual(store.previewScope, staged ? .staged : .working)
+            XCTAssertEqual(store.document?.additions, 1)
+        }
+        XCTAssertEqual(store.document?.raw, patch)
+
+        // Group check/uncheck covers both pending and staged additions without moving rows.
+        store.toggleStage(try XCTUnwrap(store.newFiles.first)); await store.operationTask?.value
+        for staged in [true, false] {
+            store.toggleGroup(store.newFiles); await store.operationTask?.value
+            XCTAssertNil(store.error)
+            XCTAssertEqual(store.newFiles.map(\.path), newPaths)
+            XCTAssertTrue(store.newFiles.allSatisfy { $0.hasStaged == staged })
+            XCTAssertEqual(store.changedFiles.map(\.path), changedPaths)
+        }
+
+        // External staging, intent-to-add and partial staging use the same grouping after refresh/reopen.
+        try git(root, ["add", "new-a.txt"]); try git(root, ["add", "-N", "new-z.txt"])
+        try write("new-a.txt", "first new file\nnot staged yet\n")
+        try await store.refreshAfterIndexWrite(repo)
+        XCTAssertEqual(store.newFiles.map(\.path), newPaths)
+        store.filter = "staged"
+        XCTAssertEqual(store.newFiles.map(\.path), ["new-a.txt"])
+        XCTAssertEqual(store.changedFiles.map(\.path), ["renamed.txt"])
+        store.filter = "working"
+        XCTAssertEqual(store.newFiles.map(\.path), newPaths)
+        XCTAssertEqual(store.changedFiles.map(\.path), ["tracked.txt"])
+        store.filter = "all"; store.query = "new-z"
+        XCTAssertEqual(store.newFiles.map(\.path), ["new-z.txt"]); XCTAssertTrue(store.changedFiles.isEmpty)
+        store.query = ""
+        let reopenedRepo = try await GitRepository.open(root)
+        reopened.repository = reopenedRepo; reopened.snapshot = try await reopenedRepo.snapshot()
+        XCTAssertEqual(reopened.newFiles.map(\.path), newPaths)
+        XCTAssertEqual(reopened.changedFiles.map(\.path), changedPaths)
+
+        // A real commit removes the new-file group; later edits belong to existing changes.
+        store.stageFiles(store.newFiles); await store.operationTask?.value
+        try git(root, ["commit", "-m", "add new files"])
+        try await store.refreshAfterIndexWrite(repo)
+        XCTAssertTrue(store.newFiles.isEmpty)
+        XCTAssertEqual(store.changedFiles.map(\.path), ["tracked.txt"])
+        try write("new-a.txt", "subsequent edit\n")
+        try await store.refreshAfterIndexWrite(repo)
+        XCTAssertTrue(store.newFiles.isEmpty)
+        XCTAssertEqual(store.changedFiles.map(\.path), ["new-a.txt", "tracked.txt"])
+    }
     @MainActor func testRealStageUnstageKeepPreviewUntilNewScopeIsReady() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("sprig-staging-ui-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

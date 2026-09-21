@@ -23,6 +23,9 @@ public struct ChangedFile: Identifiable, Equatable, Sendable {
     public var parent: String { let value = (path as NSString).deletingLastPathComponent; return value.isEmpty ? "/" : value }
     public var hasStaged: Bool { !untracked && !conflict && index != "." }
     public var hasWorking: Bool { untracked || conflict || worktree != "." }
+    // Keep new files together before their first commit, including staged additions
+    // and intent-to-add entries. This is a display classification, not index state.
+    public var isNewFile: Bool { !conflict && (untracked || index == "A" || (index == "." && worktree == "A")) }
     public var badge: String {
         if conflict { return "冲突" }; if untracked { return "新" }; if submodule { return "子模块" }
         if index == "R" || worktree == "R" { return "R" }; if index == "D" || worktree == "D" { return "D" }

@@ -51,6 +51,7 @@ final class RepositoryTests: XCTestCase {
         XCTAssertEqual(snapshot.branch, "main"); XCTAssertEqual(snapshot.head, "(initial)")
         XCTAssertEqual(snapshot.files.count, 2)
         let text = try XCTUnwrap(snapshot.files.first { $0.path == "新 文件.txt" })
+        XCTAssertTrue(text.isNewFile)
         let textDiff = try await repo.diff(for: text, scope: .working)
         XCTAssertEqual(textDiff.additions, 1)
         let binary = try XCTUnwrap(snapshot.files.first { $0.path == "image.bin" })
@@ -58,8 +59,25 @@ final class RepositoryTests: XCTestCase {
         XCTAssertTrue(binaryDiff.message?.contains("二进制") == true)
         try git("add", "新 文件.txt")
         let stagedState = try await repo.snapshot(), stagedFile = try XCTUnwrap(stagedState.files.first { $0.path == "新 文件.txt" })
+        XCTAssertTrue(stagedFile.isNewFile); XCTAssertTrue(stagedFile.hasStaged); XCTAssertFalse(stagedFile.untracked)
         let stagedDiff = try await repo.diff(for: stagedFile, scope: .staged)
         XCTAssertEqual(stagedDiff.additions, 1)
+        try await repo.unstage([stagedFile])
+        let unstagedState = try await repo.snapshot(), unstagedFile = try XCTUnwrap(unstagedState.files.first { $0.path == "新 文件.txt" })
+        XCTAssertTrue(unstagedFile.isNewFile); XCTAssertTrue(unstagedFile.untracked); XCTAssertFalse(unstagedFile.hasStaged)
+    }
+
+    func testAddAddConflictIsNotAnOrdinaryNewFile() async throws {
+        try write("base.txt", "base\n"); try initialCommit()
+        try git("checkout", "-b", "other")
+        try write("new.txt", "other branch\n"); try initialCommit()
+        try git("checkout", "main")
+        try write("new.txt", "main branch\n"); try initialCommit()
+        try git("merge", "other", accepted: [1])
+        let repo = try await GitRepository.open(root), state = try await repo.snapshot()
+        let file = try XCTUnwrap(state.files.first { $0.path == "new.txt" })
+        XCTAssertTrue(file.conflict); XCTAssertEqual(file.index, "A")
+        XCTAssertFalse(file.isNewFile, "Conflicts must stay with changes and retain conflict actions")
     }
 
     func testRenameAndSpecialPathAreLiteral() async throws {
