@@ -1,10 +1,12 @@
-# Sprig · macOS 原生版 0.5.0
+# Sprig · macOS 原生版 0.5.1
 
 SwiftUI + AppKit 界面，系统 `/usr/bin/git`，通过 Sparkle 2.10.0 提供自动更新。真实读写本地仓库。
 
 ## 打开与使用
 
 打开 `build/Sprig.app`，选择已有 Git 仓库或子目录，也可拖入文件夹。界面顶部集中显示仓库、分支、工作区页面、Fetch、Pull、Push 和设置。文件列表上方的刷新按钮或 ⌘R 重新读取本地文件、暂存状态和分支，显示刷新中、完成时间或失败状态；获取远端更新请使用 Fetch。
+
+通过左上角仓库下拉菜单打开或切换仓库（⌘O）；右上角齿轮统一打开设置（⌘,）。提交区保留 AI 生成、提交说明历史和检查入口。
 
 1. 在“更改”或“未进行版本管理的文件”中查看 Diff。点击分组三角周围、标题文字或右侧空白可展开／折叠；复选框只控制暂存。“未进行版本管理的文件”数量为 0 时隐藏，有未跟踪文件时自动显示。
 2. **勾选即暂存**该文件当前全部修改；取消勾选保留工作区内容。标记“部分”的文件包含已暂存和未暂存两份差异，直接提交只使用已暂存部分。
@@ -75,7 +77,7 @@ swift build -c release --product GitTool --arch arm64 --arch x86_64
 python3 scripts/package_app.py --arch universal
 ```
 
-产物为 `build/Sprig.app`、`build/release/0.5.0/Sprig-0.5.0-macos-universal.zip`。打包脚本使用 sips/iconutil 生成原生 ICNS，然后进行 ad-hoc 签名。编译目标保留 `GitTool` 名称，应用名称显示 Sprig；沿用 `cn.gittool.native` 保存早期仓库记录和分栏偏好。
+产物为 `build/Sprig.app`、`build/release/0.5.1/Sprig-0.5.1-macos-universal.zip`。打包脚本使用 sips/iconutil 生成原生 ICNS，然后进行 ad-hoc 签名。编译目标保留 `GitTool` 名称，应用名称显示 Sprig；沿用 `cn.gittool.native` 保存早期仓库记录和分栏偏好。
 
 71 项原生测试及 3 项发布脚本测试在临时目录创建隔离仓库，覆盖部分暂存、首次提交、修正、签署、hooks、并发 index 锁、过期确认、空白检查、分支、标签、历史、重命名、储藏、Revert、二进制恢复保护，以及 AI 请求/模拟传输/响应与排除范围、超时和取消、窗口与分栏布局稳定性、刷新期间代码像素连续性与滚动位置保留。自动同步使用本地裸仓库和两个工作副本，验证 Merge、Rebase、快进、冲突继续/中止、重启恢复、部分暂存与未跟踪文件保护、忽略文件防覆盖、储藏恢复冲突、独立 push URL/分支、并发更新重试上限和服务器拒绝后的独立重试。
 
