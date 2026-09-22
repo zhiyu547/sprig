@@ -82,7 +82,6 @@ struct WorkspaceHeader: View {
                 Rectangle().fill(Palette.border).frame(width: 1, height: 18).padding(.horizontal, 5)
             }
             ToolbarIconButton(title: "设置", symbol: "gearshape", tooltip: "设置 · ⌘,") { store.sheet = WorkspaceSheet(kind: .settings) }
-            ToolbarIconButton(title: "打开仓库", symbol: "folder", tooltip: "打开仓库 · ⌘O", action: store.chooseRepository)
         }.disabled(store.blockingBusy).allowsHitTesting(!store.busy)
     }
 

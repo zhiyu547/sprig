@@ -265,7 +265,6 @@ struct CommitEditor: View {
                     store.prepareAI(.commit)
                 }.accessibilityIdentifier("commit.generateAI")
                 messageHistory
-                ToolbarIconButton(title: "提交设置", symbol: "gearshape", size: 28) { store.sheet = WorkspaceSheet(kind: .settings) }
             }.font(.system(size: 11))
             editorField
             commitActions
