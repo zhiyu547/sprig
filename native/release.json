@@ -1,6 +1,6 @@
 {
-  "version": "0.5.1",
-  "build": "15",
+  "version": "0.5.2",
+  "build": "16",
   "minimumSystemVersion": "13.0",
   "bundleIdentifier": "cn.gittool.native",
   "repository": "zhiyu547/sprig",
