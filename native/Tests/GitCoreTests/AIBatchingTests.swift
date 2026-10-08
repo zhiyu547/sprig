@@ -10,6 +10,7 @@ private final class BatchHTTPRecorder: @unchecked Sendable {
     private var messages: [[String: String]] = []
     var failAt: Int?
     var truncateAt: Int?
+    var emptyReasoningAt: Int?
     var waitAt: Int?
     var verbose = false
     var requests: [[String: String]] { lock.lock(); defer { lock.unlock() }; return messages }
@@ -27,10 +28,14 @@ private final class BatchHTTPRecorder: @unchecked Sendable {
         }
         let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let inputs = body?["messages"] as? [[String: String]] ?? []
-        let message = ["system": inputs.first?["content"] ?? "", "user": inputs.last?["content"] ?? ""]
+        let message = ["system": inputs.first?["content"] ?? "", "user": inputs.last?["content"] ?? "",
+                       "thinking": (body?["enable_thinking"] as? Bool).map { $0 ? "on" : "off" } ?? "default"]
         lock.lock(); messages.append(message); let count = messages.count; lock.unlock()
         if waitAt == count { return nil }
         if failAt == count { return (503, Data("mock unavailable".utf8)) }
+        if emptyReasoningAt == count {
+            return (200, try! JSONSerialization.data(withJSONObject: ["choices": [["finish_reason": "length", "message": ["content": NSNull(), "reasoning_content": "private-analysis"]]], "usage": ["completion_tokens": 4096, "completion_tokens_details": ["reasoning_tokens": 4096]]]))
+        }
         let user = message["user"]!
         let text: String
         if user.contains("<staged_diff>") {
@@ -69,13 +74,13 @@ final class AIBatchingTests: XCTestCase {
         let patch = "diff --git a/tasks.swift b/tasks.swift\n--- a/tasks.swift\n+++ b/tasks.swift\n@@ -0,0 +1,9000 @@\n" + String(repeating: "+// 添加筛选 🌱\n", count: bytes / 20)
         return AIContext(stamp: .init(head: "fixture", branch: "refs/heads/main", indexHash: "stamp"), included: ["tasks.swift"], excluded: [".env（排除）"], patch: patch, whitespaceResult: "未执行测试")
     }
-    private func withTransport(_ recorder: BatchHTTPRecorder, run: (URLSession, AIConfiguration) async throws -> Void) async throws {
-        let host = UUID().uuidString.lowercased() + ".invalid"
+    private func withTransport(_ recorder: BatchHTTPRecorder, qwen: Bool = false, run: (URLSession, AIConfiguration) async throws -> Void) async throws {
+        let host = UUID().uuidString.lowercased() + (qwen ? ".cn-beijing.maas.aliyuncs.com" : ".invalid")
         BatchHTTPProtocol.register(recorder, at: host)
         let settings = URLSessionConfiguration.ephemeral; settings.protocolClasses = [BatchHTTPProtocol.self]
         let session = URLSession(configuration: settings)
         defer { session.invalidateAndCancel(); BatchHTTPProtocol.remove(host) }
-        var config = AIConfiguration(); config.baseURL = "https://" + host + "/v1"; config.model = "fixture"
+        var config = AIConfiguration(); config.baseURL = "https://" + host + "/v1"; config.model = qwen ? "qwen3.8-flash" : "fixture"
         try await run(session, config)
     }
     func testSplittingKeepsEveryByteAndContinuationForHugeUnicodeLine() throws {
@@ -142,6 +147,33 @@ final class AIBatchingTests: XCTestCase {
                 } catch { XCTAssertTrue(error.localizedDescription.contains(truncated ? "截断" : "503")) }
             }
             XCTAssertEqual(recorder.requests.count, 2)
+        }
+    }
+    func testSecondOfTwoBatchesReportsEmptyTruncationWithoutSynthesizingPartialDraft() async throws {
+        let context = context(bytes: 130_000), recorder = BatchHTTPRecorder(); recorder.emptyReasoningAt = 2
+        XCTAssertEqual(context.batches.count, 2)
+        try await withTransport(recorder) { session, config in
+            do {
+                _ = try await AIClient().generate(context: context, configuration: config, key: "", intent: .commit, session: session)
+                XCTFail("An incomplete analysis must not become a draft")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("2/2"))
+                XCTAssertTrue(error.localizedDescription.contains("截断"))
+                XCTAssertTrue(error.localizedDescription.contains("思考 Token：4096"))
+                XCTAssertFalse(error.localizedDescription.contains("private-analysis"))
+            }
+        }
+        XCTAssertEqual(recorder.requests.count, 2)
+    }
+    func testQwenCommitAnalysisAndSynthesisUseDirectOutputWhileReviewKeepsProviderDefault() async throws {
+        for intent in [AIIntent.commit, .review] {
+            let context = context(), recorder = BatchHTTPRecorder()
+            try await withTransport(recorder, qwen: true) { session, config in
+                let output = try await AIClient().generate(context: context, configuration: config, key: "", intent: intent, session: session)
+                XCTAssertTrue(output.contains("fact-1"))
+            }
+            XCTAssertEqual(recorder.requests.count, context.batches.count + (intent == .commit ? 1 : 0))
+            XCTAssertTrue(recorder.requests.allSatisfy { $0["thinking"] == (intent == .commit ? "off" : "default") })
         }
     }
     func testCancellationBetweenBatchesSendsNoFurtherRequests() async throws {
