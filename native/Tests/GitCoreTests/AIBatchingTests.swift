@@ -29,11 +29,14 @@ private final class BatchHTTPRecorder: @unchecked Sendable {
         let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let inputs = body?["messages"] as? [[String: String]] ?? []
         let message = ["system": inputs.first?["content"] ?? "", "user": inputs.last?["content"] ?? "",
-                       "thinking": (body?["enable_thinking"] as? Bool).map { $0 ? "on" : "off" } ?? "default"]
+                       "thinking": (body?["enable_thinking"] as? Bool).map { $0 ? "on" : "off" } ?? "default",
+                       "deepseekThinking": (body?["thinking"] as? [String: String])?["type"] ?? "default"]
         lock.lock(); messages.append(message); let count = messages.count; lock.unlock()
         if waitAt == count { return nil }
         if failAt == count { return (503, Data("mock unavailable".utf8)) }
-        if emptyReasoningAt == count {
+        // Reproduce DeepSeek's default thinking mode consuming the entire 4096-token budget.
+        let deepSeekThinkingExhausted = body?["model"] as? String == "deepseek-flash" && message["deepseekThinking"] != "disabled"
+        if emptyReasoningAt == count || deepSeekThinkingExhausted {
             return (200, try! JSONSerialization.data(withJSONObject: ["choices": [["finish_reason": "length", "message": ["content": NSNull(), "reasoning_content": "private-analysis"]]], "usage": ["completion_tokens": 4096, "completion_tokens_details": ["reasoning_tokens": 4096]]]))
         }
         let user = message["user"]!
@@ -74,8 +77,8 @@ final class AIBatchingTests: XCTestCase {
         let patch = "diff --git a/tasks.swift b/tasks.swift\n--- a/tasks.swift\n+++ b/tasks.swift\n@@ -0,0 +1,9000 @@\n" + String(repeating: "+// 添加筛选 🌱\n", count: bytes / 20)
         return AIContext(stamp: .init(head: "fixture", branch: "refs/heads/main", indexHash: "stamp"), included: ["tasks.swift"], excluded: [".env（排除）"], patch: patch, whitespaceResult: "未执行测试")
     }
-    private func withTransport(_ recorder: BatchHTTPRecorder, qwen: Bool = false, run: (URLSession, AIConfiguration) async throws -> Void) async throws {
-        let host = UUID().uuidString.lowercased() + (qwen ? ".cn-beijing.maas.aliyuncs.com" : ".invalid")
+    private func withTransport(_ recorder: BatchHTTPRecorder, qwen: Bool = false, host requestedHost: String? = nil, run: (URLSession, AIConfiguration) async throws -> Void) async throws {
+        let host = requestedHost ?? UUID().uuidString.lowercased() + (qwen ? ".cn-beijing.maas.aliyuncs.com" : ".invalid")
         BatchHTTPProtocol.register(recorder, at: host)
         let settings = URLSessionConfiguration.ephemeral; settings.protocolClasses = [BatchHTTPProtocol.self]
         let session = URLSession(configuration: settings)
@@ -175,6 +178,29 @@ final class AIBatchingTests: XCTestCase {
             XCTAssertEqual(recorder.requests.count, context.batches.count + (intent == .commit ? 1 : 0))
             XCTAssertTrue(recorder.requests.allSatisfy { $0["thinking"] == (intent == .commit ? "off" : "default") })
         }
+    }
+    func testDeepSeekCommitAcrossFortyFiveFilesFinishesAllFourBatchesAndSynthesis() async throws {
+        let files = (1...45).map { "module\($0).swift" }
+        let patch = files.map { path in
+            "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n@@ -0,0 +1,368 @@\n" + String(repeating: "+// synthetic change\n", count: 368)
+        }.joined()
+        let context = AIContext(stamp: context().stamp, included: files, excluded: [], patch: patch, whitespaceResult: "未执行测试")
+        XCTAssertEqual(context.included.count, 45)
+        XCTAssertEqual(context.batches.count, 4)
+        XCTAssertTrue((350_000...360_000).contains(patch.utf8.count))
+        let recorder = BatchHTTPRecorder()
+        try await withTransport(recorder, host: "api.deepseek.com") { session, config in
+            var config = config; config.model = "deepseek-flash"
+            let result = try await AIClient().generate(context: context, configuration: config, key: "", intent: .commit, session: session)
+            XCTAssertTrue(result.hasPrefix("feat(tasks):"))
+            for index in 1...4 { XCTAssertTrue(result.contains("fact-\(index)")) }
+        }
+        XCTAssertEqual(recorder.requests.count, 5)
+        XCTAssertTrue(recorder.requests.allSatisfy { $0["deepseekThinking"] == "disabled" })
+        let sentPatches = recorder.requests.prefix(4).map { request in
+            String(request["user"]!.components(separatedBy: "<staged_diff>\n")[1].components(separatedBy: "\n</staged_diff>")[0])
+        }
+        XCTAssertEqual(sentPatches.joined(), patch)
     }
     func testCancellationBetweenBatchesSendsNoFurtherRequests() async throws {
         let recorder = BatchHTTPRecorder(), reachedSecond = expectation(description: "second batch progress")

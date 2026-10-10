@@ -86,4 +86,30 @@ final class AIResponseTests: XCTestCase {
             XCTAssertEqual(body["max_tokens"] as? Int, 4096)
         }
     }
+
+    func testDeepSeekCommitDisablesThinkingOnlyForVerifiedModelsAndOfficialHost() throws {
+        let context = AIContext(stamp: .init(head: "test", branch: "refs/heads/main", indexHash: "test"), included: ["demo.txt"], excluded: [], patch: "+new title", whitespaceResult: "未执行测试")
+        for (url, model, intent, direct) in [
+            ("https://api.deepseek.com", "deepseek-flash", AIIntent.commit, true),
+            ("https://api.deepseek.com/v1", "deepseek-v4-pro", .commit, true),
+            ("https://API.DEEPSEEK.COM/chat/completions", "deepseek-v4-flash", .commit, true),
+            ("https://api.deepseek.com", "deepseek-v4-flash-vision-exp", .commit, true),
+            ("https://api.deepseek.com", "deepseek-flash", .review, false),
+            ("https://api.deepseek.com", "unknown-model", .commit, false),
+            ("https://proxy.example.invalid/v1", "deepseek-flash", .commit, false),
+            ("https://api.deepseek.com.example.invalid", "deepseek-flash", .commit, false),
+            ("https://proxy.api.deepseek.com", "deepseek-flash", .commit, false)
+        ] {
+            for modernLimit in [false, true] {
+                var config = AIConfiguration(); config.baseURL = url; config.model = model; config.modernTokenLimit = modernLimit
+                let request = try AIClient().request(context: context, configuration: config, key: "", intent: intent)
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+                if direct { XCTAssertEqual(body["thinking"] as? [String: String], ["type": "disabled"], model) }
+                else { XCTAssertNil(body["thinking"], url + " " + model) }
+                XCTAssertNil(body["enable_thinking"])
+                XCTAssertEqual(body["model"] as? String, model)
+                XCTAssertEqual(body[modernLimit ? "max_completion_tokens" : "max_tokens"] as? Int, 4096)
+            }
+        }
+    }
 }

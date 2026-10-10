@@ -104,9 +104,10 @@ public struct AIClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !key.isEmpty { request.setValue("Bearer " + key, forHTTPHeaderField: "Authorization") }
         var payload: [String: Any] = ["model": configuration.model, "messages": [["role": "system", "content": system], ["role": "user", "content": user]], "stream": false, configuration.modernTokenLimit ? "max_completion_tokens" : "max_tokens": 4096]
-        // Commit summaries do not need Qwen's default deep-thinking pass. Keep the
-        // vendor parameter scoped to verified hybrid models on Alibaba endpoints.
+        // Commit summaries use final-answer output. Provider-specific switches
+        // stay scoped to verified models and official endpoints.
         if intent == .commit, configuration.supportsDirectQwenOutput { payload["enable_thinking"] = false }
+        if intent == .commit, configuration.supportsDirectDeepSeekOutput { payload["thinking"] = ["type": "disabled"] }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         return request
     }
@@ -189,6 +190,14 @@ public struct AIClient: Sendable {
 }
 
 private extension AIConfiguration {
+    var supportsDirectDeepSeekOutput: Bool {
+        guard let host = try? endpoint().host?.lowercased(), host == "api.deepseek.com" else { return false }
+        // Official Chat Completions API defaults to thinking mode. Flash's
+        // documented legacy aliases are served by the same current model.
+        // https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/
+        return ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"].contains(model)
+    }
+
     var supportsDirectQwenOutput: Bool {
         guard let host = try? endpoint().host?.lowercased(),
               host.hasSuffix(".maas.aliyuncs.com") || ["dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com"].contains(host) else { return false }
