@@ -73,10 +73,11 @@ struct WorkspaceHeader: View {
         HStack(spacing: 4) {
             if store.snapshot != nil {
                 syncButton("获取", symbol: "arrow.down.to.line", compact: compact, help: "获取远端更新 · Fetch") {
-                    store.runOperation("获取远端更新") { try await $0.fetch() }
+                    store.runNetworkOperation("获取远端更新") { try await $0.fetch(operation: $1) }
                 }
                 syncButton("拉取", symbol: "arrow.down", compact: compact, help: "更新项目：快进拉取 · Pull") {
-                    store.runOperation("快进拉取") { try await $0.pull() }
+                    // git pull also performs local checkout; only push/fetch expose cancellation.
+                    store.runNetworkOperation("快进拉取", cancellable: false) { try await $0.pull(operation: $1) }
                 }
                 syncButton("推送", symbol: "arrow.up", compact: false, help: "推送当前提交", action: store.openPush)
                 Rectangle().fill(Palette.border).frame(width: 1, height: 18).padding(.horizontal, 5)
@@ -102,7 +103,19 @@ struct WorkspaceActivity: View {
         HStack(spacing: 7) {
             if store.blockingBusy {
                 ProgressView().controlSize(.mini)
-                Text(store.busyTitle).lineLimit(1)
+                Text(store.networkProgress.isEmpty ? store.busyTitle : store.networkProgress)
+                    .lineLimit(1).help(store.busyTitle)
+                if let start = store.networkStartedAt {
+                    TimelineView(.periodic(from: start, by: 1)) { context in
+                        Text("\(Int(context.date.timeIntervalSince(start))) 秒").monospacedDigit().fixedSize()
+                    }
+                    if store.networkCanCancel {
+                        Button(store.networkCancelling ? "正在取消…" : "取消", action: store.cancelNetworkOperation)
+                            .disabled(store.networkCancelling).fixedSize()
+                            .help("停止网络传输；本地整合或恢复将在安全结束后停止后续推送")
+                            .accessibilityIdentifier("workspace.cancelNetwork")
+                    }
+                }
                 if let start = store.aiStartedAt {
                     TimelineView(.periodic(from: start, by: 1)) { context in
                         Text("\(Int(context.date.timeIntervalSince(start))) 秒").monospacedDigit()

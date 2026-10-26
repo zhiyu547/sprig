@@ -76,6 +76,12 @@ enum ManualRefreshState: Equatable {
     @Published var synchronizedPushSession: PushSession?
     @Published var aiSource: IndexStamp?
     @Published var aiStartedAt: Date?
+    @Published var networkStartedAt: Date?
+    @Published var networkProgress = ""
+    @Published var networkCancelling = false
+    @Published var networkCanCancel = false
+    var networkOperation: GitNetworkOperation?
+    var networkOperationID: UUID?
     var aiRequestID = UUID()
     @Published var preview: DiffPreview?
     var document: DiffDocument? { preview?.document }

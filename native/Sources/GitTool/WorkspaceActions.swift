@@ -37,7 +37,7 @@ extension RepositoryStore {
         console.insert(OperationLog(title: title, output: String(clean.prefix(30_000)), failed: failed), at: 0)
         console = Array(console.prefix(40))
     }
-    func runOperation(_ title: String, indexPaths: Set<String> = [], _ action: @escaping (GitRepository) async throws -> String) {
+    func runOperation(_ title: String, indexPaths: Set<String> = [], _ action: @escaping @MainActor (GitRepository) async throws -> String) {
         guard !busy, let repository else { return }
         indexUpdatePaths = indexPaths
         if !indexPaths.isEmpty { suspendRefreshForIndexWrite() }
@@ -55,7 +55,7 @@ extension RepositoryStore {
                 do { try await refreshAfterIndexWrite(repository) }
                 catch { self.error = "刷新暂存状态失败，请刷新后重试。\n" + error.localizedDescription }
             }
-            busy = false; busyTitle = ""; indexUpdatePaths = []
+            busy = false; busyTitle = ""; indexUpdatePaths = []; operationTask = nil
             if indexPaths.isEmpty { needsRefresh = false; refresh() }
             else if needsRefresh { needsRefresh = false; scheduleRefresh() }
             if page == .history { loadHistory() }
@@ -177,15 +177,16 @@ extension RepositoryStore {
         Task { do { let oid = try await repository.headOID(); guard token == repositoryToken else { return }; guard oid != "(initial)" else { error = "当前仓库还没有提交。"; return }; sheet = WorkspaceSheet(kind: .push(oid)) } catch { self.error = error.localizedDescription } }
     }
     func performPush(oid: String, destination: PushDestination, autoSync: Bool = true, strategy: PushStrategy = .merge) {
+        guard !busy else { return }
         sheet = nil; pendingPushOID = oid; pendingPushTarget = destination
         savePushPreference(autoSync: autoSync, strategy: strategy)
-        runOperation("推送") { repo in
+        runNetworkOperation("推送") { repo, operation in
             let output: String
             if autoSync {
-                output = try await repo.synchronizedPush(to: destination, expectedOID: oid, strategy: strategy) { title in
-                    await MainActor.run { self.busyTitle = title }
+                output = try await repo.synchronizedPush(to: destination, expectedOID: oid, strategy: strategy, operation: operation) { title in
+                    await MainActor.run { self.networkStage(title) }
                 }
-            } else { output = try await repo.push(to: destination, expectedOID: oid) }
+            } else { output = try await repo.push(to: destination, expectedOID: oid, operation: operation) }
             await MainActor.run { self.pendingPushOID = nil; self.pendingPushTarget = nil }
             return autoSync ? output : "推送完成 → \(destination.remote)/\(destination.branch)\n" + output
         }
@@ -214,8 +215,8 @@ extension RepositoryStore {
         UserDefaults.standard.set(strategy.rawValue, forKey: pushPreferenceKey("strategy"))
     }
     func resumePush(restorationReviewed: Bool = false) {
-        runOperation("继续同步并推送") { repo in
-            let output = try await repo.resumeSynchronizedPush(restorationReviewed: restorationReviewed) { title in await MainActor.run { self.busyTitle = title } }
+        runNetworkOperation("继续同步并推送") { repo, operation in
+            let output = try await repo.resumeSynchronizedPush(restorationReviewed: restorationReviewed, operation: operation) { title in await MainActor.run { self.networkStage(title) } }
             await MainActor.run { self.pendingPushOID = nil; self.pendingPushTarget = nil }
             return output
         }

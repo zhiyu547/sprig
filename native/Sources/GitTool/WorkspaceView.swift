@@ -102,18 +102,18 @@ struct WorkspaceView: View {
                 Text(store.watching ? "自动刷新" : "手动刷新")
             }
             WorkspaceActivity(store: store)
-            if let session = store.synchronizedPushSession {
+            if let session = store.synchronizedPushSession, !store.busy {
                 Text(session.status).foregroundStyle(.orange).lineLimit(1)
                 Button(session.needsRestoreReview ? "恢复已核对，继续" : "继续同步并推送", action: store.retryPush).disabled(store.busy)
                 Button("取消同步", action: store.cancelPush).disabled(store.busy)
-            } else if let operation = store.snapshot?.operation {
+            } else if let operation = store.snapshot?.operation, !store.busy {
                 Text(operation).foregroundStyle(.orange)
                 Button("继续") { store.runOperation("继续 Git 操作") { try await $0.continueOperation(abort: false) } }.disabled(store.blockingBusy).allowsHitTesting(!store.busy)
                 Button("中止") { store.confirm("中止当前 Git 操作？", message: operation, button: "中止") { store.runOperation("中止 Git 操作") { try await $0.continueOperation(abort: true) } } }.disabled(store.blockingBusy).allowsHitTesting(!store.busy)
             }
             Spacer()
-            if let upstream = store.snapshot?.upstream { Text("\(upstream)  ↑\(store.snapshot?.ahead ?? 0) ↓\(store.snapshot?.behind ?? 0)").lineLimit(1).help("本地已知远端状态，点击 Fetch 更新") }
-            if let date = store.updatedAt { Text("\(date.formatted(date: .omitted, time: .standard)) · \(store.refreshMilliseconds) ms") }
+            if store.networkStartedAt == nil, let upstream = store.snapshot?.upstream { Text("\(upstream)  ↑\(store.snapshot?.ahead ?? 0) ↓\(store.snapshot?.behind ?? 0)").lineLimit(1).help("本地已知远端状态，点击 Fetch 更新") }
+            if store.networkStartedAt == nil, let date = store.updatedAt { Text("\(date.formatted(date: .omitted, time: .standard)) · \(store.refreshMilliseconds) ms") }
         }.font(.system(size: 10)).foregroundStyle(.secondary).controlSize(.mini).padding(.horizontal, 16).frame(height: 28).background(Palette.sidebar.opacity(0.5)).overlay(alignment: .top) { Divider() }
     }
     private var console: some View {

@@ -33,7 +33,7 @@ import SwiftUI
     private func canClose() -> Bool {
         if store.aiStartedAt != nil { store.cancelAI(); return true }
         guard store.busy else { return true }
-        store.error = "请等待当前操作完成后退出。AI 请求可先点击取消。"
+        store.error = "请等待当前操作完成后退出。推送、获取或 AI 请求可先点击底部取消，并等待操作结束。"
         return false
     }
     func applicationWillTerminate(_ notification: Notification) { store.stop() }
