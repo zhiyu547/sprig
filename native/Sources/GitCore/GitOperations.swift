@@ -72,6 +72,11 @@ extension GitRepository {
         guard result.code == 0 else { throw GitError.message(result.error.isEmpty ? result.text : result.error) }
         return result.text
     }
+    @discardableResult func checkedNetwork(_ args: [String], operation: GitNetworkOperation) async throws -> String {
+        let result = try await runner.runNetwork(args, at: root, operation: operation)
+        guard result.code == 0 else { throw GitError.message(result.error.isEmpty ? result.text : result.error) }
+        return result.text
+    }
     public func headOID() async throws -> String {
         let result = try await runner.run(["rev-parse", "--verify", "HEAD"], at: root)
         if result.code != 0 { return "(initial)" }
@@ -260,12 +265,13 @@ extension GitRepository {
         let branch = merge.code == 0 ? merge.text.trimmingCharacters(in: .newlines).replacingOccurrences(of: "refs/heads/", with: "") : state.branch
         return PushDestination(remote: remoteName, branch: branch)
     }
-    public func push(to destination: PushDestination, expectedOID: String) async throws -> String {
+    public func push(to destination: PushDestination, expectedOID: String, operation: GitNetworkOperation = GitNetworkOperation()) async throws -> String {
+        try operation.checkCancellation()
         guard try await headOID() == expectedOID else { throw GitError.message("当前提交已经改变，请重新确认推送内容。") }
         guard try await remotes().contains(destination.remote), !destination.remote.hasPrefix("-") else { throw GitError.message("请选择已有的远程仓库。") }
         _ = try await checked(["check-ref-format", "refs/heads/" + destination.branch])
         let state = try await snapshot()
-        let output = try await checked(["push", "--porcelain", destination.remote, expectedOID + ":refs/heads/" + destination.branch], timeout: 120)
+        let output = try await checkedNetwork(["push", "--progress", "--porcelain", destination.remote, expectedOID + ":refs/heads/" + destination.branch], operation: operation)
         if state.branch != "(detached)" {
             do {
                 _ = try await checked(["config", "branch.\(state.branch).remote", destination.remote])
@@ -274,8 +280,8 @@ extension GitRepository {
         }
         return output
     }
-    public func fetch() async throws -> String { try await checked(["fetch", "--all", "--prune"], timeout: 120) }
-    public func pull() async throws -> String { try await requireClean(); return try await checked(["pull", "--ff-only"], timeout: 120) }
+    public func fetch(operation: GitNetworkOperation = GitNetworkOperation()) async throws -> String { try await checkedNetwork(["fetch", "--progress", "--all", "--prune"], operation: operation) }
+    public func pull(operation: GitNetworkOperation = GitNetworkOperation()) async throws -> String { try await requireClean(); return try await checkedNetwork(["pull", "--progress", "--ff-only"], operation: operation) }
     public func stashes() async throws -> [GitStash] {
         let output = try await checked(["stash", "list", "--format=%gd%x00%H%x00%s"])
         return output.split(separator: "\n").compactMap { line in

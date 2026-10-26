@@ -89,14 +89,14 @@ extension GitRepository {
         guard result.code == 0 || result.code == 1 else { throw GitError.message(result.error) }
         return result.code == 0
     }
-    private func fetchPushBranch(_ session: PushSession) async throws -> String? {
+    private func fetchPushBranch(_ session: PushSession, operation: GitNetworkOperation) async throws -> String? {
         let ref = "refs/heads/" + session.destination.branch
-        let exists = try await runner.run(["ls-remote", "--exit-code", "--refs", session.pushURL, ref], at: root, timeout: 120)
+        let exists = try await runner.runNetwork(["ls-remote", "--exit-code", "--refs", session.pushURL, ref], at: root, operation: operation)
         if exists.code == 2 { return nil } // Creating a new remote branch.
         guard exists.code == 0 else { throw GitError.message(exists.error + exists.text) }
         // Fetch from the PUSH URL, which may differ from the remote's fetch URL.
         // A private ref avoids racing with another client's FETCH_HEAD updates.
-        _ = try await checked(["fetch", "--no-tags", "--no-write-fetch-head", session.pushURL, "+" + ref + ":" + session.recoveryRef], timeout: 120)
+        _ = try await checkedNetwork(["fetch", "--progress", "--no-tags", "--no-write-fetch-head", session.pushURL, "+" + ref + ":" + session.recoveryRef], operation: operation)
         return try await verifiedRevision(session.recoveryRef)
     }
     private func protectPushWork(_ session: inout PushSession) async throws {
@@ -171,8 +171,9 @@ extension GitRepository {
         }
     }
 
-    public func synchronizedPush(to destination: PushDestination, expectedOID: String, strategy: PushStrategy,
+    public func synchronizedPush(to destination: PushDestination, expectedOID: String, strategy: PushStrategy, operation: GitNetworkOperation = GitNetworkOperation(),
                                  progress: @Sendable (String) async -> Void = { _ in }) async throws -> String {
+        try operation.checkCancellation()
         let lock = try PushLock(gitDirectory.appendingPathComponent("sprig-push.lock")); defer { withExtendedLifetime(lock) {} }
         guard try pushSession() == nil else { throw GitError.message("已有待完成的同步推送，请先继续或取消该任务。") }
         let current = try await stamp(), state = try await snapshot()
@@ -181,11 +182,12 @@ extension GitRepository {
         let url = try await pushAddress(destination)
         var session = PushSession(destination: destination, pushURL: url, branchRef: current.branch, expectedOID: expectedOID, strategy: strategy)
         try savePush(session)
-        return try await drivePush(&session, progress: progress)
+        return try await drivePush(&session, operation: operation, progress: progress)
     }
 
-    public func resumeSynchronizedPush(restorationReviewed: Bool = false,
+    public func resumeSynchronizedPush(restorationReviewed: Bool = false, operation: GitNetworkOperation = GitNetworkOperation(),
                                        progress: @Sendable (String) async -> Void = { _ in }) async throws -> String {
+        try operation.checkCancellation()
         let lock = try PushLock(gitDirectory.appendingPathComponent("sprig-push.lock")); defer { withExtendedLifetime(lock) {} }
         guard var session = try pushSession() else { throw GitError.message("当前没有待继续的同步推送。") }
         if session.phase == .protecting { try await recoverPushStash(&session) }
@@ -210,17 +212,18 @@ extension GitRepository {
             session.stashOID = nil; session.stashRestored = false; session.phase = .ready; try savePush(session)
         }
         if session.stashOID != nil && !session.stashRestored { try await restorePushWork(&session) }
-        return try await drivePush(&session, progress: progress)
+        return try await drivePush(&session, operation: operation, progress: progress)
     }
 
-    private func drivePush(_ session: inout PushSession, progress: @Sendable (String) async -> Void) async throws -> String {
+    private func drivePush(_ session: inout PushSession, operation: GitNetworkOperation, progress: @Sendable (String) async -> Void) async throws -> String {
         do {
             for attempt in 0..<3 {
+                try operation.checkCancellation()
                 try await validatePush(session)
                 let state = try await snapshot()
                 guard state.operation == nil, !state.files.contains(where: \.conflict) else { throw GitError.message("请先处理当前 Git 操作或冲突。") }
                 await progress(attempt == 0 ? "获取目标分支最新提交" : "远端再次更新 · 重新同步 \(attempt)/2")
-                let remoteOID = try await fetchPushBranch(session)
+                let remoteOID = try await fetchPushBranch(session, operation: operation)
                 try await validatePush(session)
                 if let remoteOID, try await !isAncestor(remoteOID, session.expectedOID) {
                     let fastForward = try await isAncestor(session.expectedOID, remoteOID)
@@ -251,7 +254,7 @@ extension GitRepository {
                 }
                 try await validatePush(session)
                 await progress("推送到 \(session.destination.remote)/\(session.destination.branch)")
-                let result = try await runner.run(["-c", "remote.\(session.destination.remote).mirror=false", "-c", "push.followTags=false", "push", "--porcelain", "--no-force", "--no-follow-tags", session.destination.remote, session.expectedOID + ":refs/heads/" + session.destination.branch], at: root, timeout: 120)
+                let result = try await runner.runNetwork(["-c", "remote.\(session.destination.remote).mirror=false", "-c", "push.followTags=false", "push", "--progress", "--porcelain", "--no-force", "--no-follow-tags", session.destination.remote, session.expectedOID + ":refs/heads/" + session.destination.branch], at: root, operation: operation)
                 if result.code == 0 {
                     var warning = ""
                     do {

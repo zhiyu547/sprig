@@ -24,6 +24,52 @@ extension OperationsTests {
     private func sync(_ repo: GitRepository, strategy: PushStrategy = .merge, branch: String = "main") async throws -> String {
         try await repo.synchronizedPush(to: .init(remote: "origin", branch: branch), expectedOID: repo.headOID(), strategy: strategy)
     }
+    func testCancelTransportPreservesLocalCommitAndAllowsIndependentRetry() async throws {
+        let (remote, _) = try syncFixture(); try localCommit()
+        let remoteBefore = try git(["rev-parse", "main"], at: remote), localBefore = try git(["rev-parse", "HEAD"])
+        try write(".git/hooks/pre-push", "#!/bin/sh\nprintf 'Writing objects: 25%% (1/4)\\r' >&2\ntouch .git/push-started\nsleep 4\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.appendingPathComponent(".git/hooks/pre-push").path)
+        let repo = try await GitRepository.open(root), operation = GitNetworkOperation()
+        let task = Task { try await repo.push(to: .init(remote: "origin", branch: "main"), expectedOID: localBefore, operation: operation) }
+        for _ in 0..<100 {
+            if FileManager.default.fileExists(atPath: root.appendingPathComponent(".git/push-started").path) { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(".git/push-started").path))
+        operation.cancel()
+        do { _ = try await task.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError, error.localizedDescription) }
+        XCTAssertEqual(try git(["rev-parse", "HEAD"]), localBefore)
+        XCTAssertEqual(try git(["rev-parse", "main"], at: remote), remoteBefore)
+        try FileManager.default.removeItem(at: root.appendingPathComponent(".git/hooks/pre-push"))
+        _ = try await repo.push(to: .init(remote: "origin", branch: "main"), expectedOID: localBefore)
+        XCTAssertEqual(try git(["rev-parse", "main"], at: remote), localBefore)
+    }
+
+    func testCancelDuringIntegrationRestoresDraftsAndRetainsResumablePush() async throws {
+        let (remote, other) = try syncFixture(); try remoteCommit(other); try localCommit()
+        let remoteBefore = try git(["rev-parse", "main"], at: remote)
+        try write("draft.txt", "selected draft\n"); try git(["add", "draft.txt"])
+        try write("draft.txt", "selected draft\nremaining draft\n"); try write("new draft.txt", "untracked\n")
+        let indexBefore = try git(["diff", "--cached"]), workBefore = try git(["diff"])
+        let repo = try await GitRepository.open(root), operation = GitNetworkOperation()
+        do {
+            _ = try await repo.synchronizedPush(to: .init(remote: "origin", branch: "main"), expectedOID: repo.headOID(), strategy: .merge, operation: operation) { title in
+                if title == "正在 " + PushStrategy.merge.title { operation.cancel() }
+            }
+            XCTFail("Expected cancellation before transport")
+        } catch { XCTAssertTrue(error is CancellationError, error.localizedDescription) }
+        XCTAssertTrue(operation.isCancelled)
+        XCTAssertEqual(try git(["rev-parse", "main"], at: remote), remoteBefore)
+        XCTAssertEqual(try git(["diff", "--cached"]), indexBefore); XCTAssertEqual(try git(["diff"]), workBefore)
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("new draft.txt")), "untracked\n")
+        XCTAssertEqual(try repo.pushSession()?.phase, .ready); XCTAssertTrue(try repo.pushSession()?.stashRestored == true)
+        _ = try await repo.resumeSynchronizedPush()
+        XCTAssertNil(try repo.pushSession()); XCTAssertEqual(try git(["stash", "list"]), "")
+        XCTAssertEqual(try git(["rev-parse", "HEAD"]), try git(["rev-parse", "main"], at: remote))
+        XCTAssertEqual(try git(["diff", "--cached"]), indexBefore); XCTAssertEqual(try git(["diff"]), workBefore)
+    }
+
     func testSyncMergePreservesPartialIndexAndUntrackedFiles() async throws {
         let (remote, other) = try syncFixture(); try remoteCommit(other); try localCommit()
         let localOID = try git(["rev-parse", "HEAD"])
