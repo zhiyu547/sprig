@@ -177,7 +177,11 @@ struct SettingsSheet: View {
 struct CommitSheet: View {
     @ObservedObject var store: RepositoryStore
     let preparation: CommitPreparation
-    let push: Bool
+    let push: CommitPush?
+    private var actionTitle: String {
+        if case .tracked? = push { return store.amend ? "修正并推送" : "提交并推送" }
+        return store.amend ? "确认修正" : "确认提交"
+    }
     var body: some View {
         SheetFrame(store: store, title: store.amend ? "确认修正上次提交" : "确认提交范围") {
             Text("\(store.branchTitle) · \(preparation.files.count) 个暂存文件").font(.headline)
@@ -187,10 +191,16 @@ struct CommitSheet: View {
             Text("提交说明").font(.caption).foregroundStyle(.secondary)
             ScrollView { Text(store.commitMessage).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(height: 170)
             if !preparation.checkOutput.isEmpty { Text(store.settings.checkWhitespace ? "空白检查发现问题：请返回修复，或在设置中关闭阻止提交。" : "空白检查发现问题，将按设置继续提交。").font(.caption).foregroundStyle(.orange) }
-            Text("工作区未暂存的修改会保留。Git hooks 将照常运行。" + (push ? "提交成功后，继续确认远端与目标分支。" : "")).font(.caption).foregroundStyle(.secondary)
+            Text("工作区未暂存的修改会保留。Git hooks 将照常运行。").font(.caption).foregroundStyle(.secondary)
+            if case let .tracked(target, strategy)? = push {
+                Text("提交后将以 \(strategy.title) 同步并推送到 \(target.destination.remote)/\(target.destination.branch)。")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if case .chooseTarget? = push {
+                Text("提交后请选择远端与目标分支。").font(.caption).foregroundStyle(.secondary)
+            }
         } actions: {
             Button("返回编辑") { store.sheet = nil }
-            Button(store.amend ? "确认修正" : "确认提交") { store.performCommit(preparation, push: push) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(store.busy || (store.settings.checkWhitespace && !preparation.checkOutput.isEmpty))
+            Button(actionTitle) { store.performCommit(preparation, push: push) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(store.busy || (store.settings.checkWhitespace && !preparation.checkOutput.isEmpty))
         }
     }
 }

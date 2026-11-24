@@ -79,7 +79,8 @@ struct WorkspaceHeader: View {
                     // git pull also performs local checkout; only push/fetch expose cancellation.
                     store.runNetworkOperation("快进拉取", cancellable: false) { try await $0.pull(operation: $1) }
                 }
-                syncButton("推送", symbol: "arrow.up", compact: false, help: "推送当前提交", action: store.openPush)
+                syncButton("推送", symbol: "arrow.up", compact: false, help: "推送当前分支。右键可选择推送目标。") { store.openPush() }
+                    .contextMenu { Button("选择推送目标…") { store.openPush(chooseTarget: true) } }
                 Rectangle().fill(Palette.border).frame(width: 1, height: 18).padding(.horizontal, 5)
             }
             ToolbarIconButton(title: "设置", symbol: "gearshape", tooltip: "设置 · ⌘,") { store.sheet = WorkspaceSheet(kind: .settings) }

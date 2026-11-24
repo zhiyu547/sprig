@@ -140,7 +140,7 @@ public struct GitRepository: Sendable {
         let result = try await runner.run(arguments, at: root)
         try Task.checkCancellation()
         guard result.code == 0 else { throw GitError.message(result.error) }
-        guard let patch = String(data: result.data, encoding: .utf8) else { return .notice("此差异不是 UTF-8 文本，当前不支持文本预览。", path: file.path) }
+        guard let patch = String(data: result.data, encoding: .utf8) else { return .notice("此文件没有 UTF-8 文本预览，可照常暂存、提交和推送。", path: file.path) }
         return DiffDocument.parse(patch, path: file.path)
     }
 
@@ -156,11 +156,11 @@ public struct GitRepository: Sendable {
         defer { Darwin.close(descriptor) }
         var info = stat()
         guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return .notice("此文件类型不支持文本预览。", path: path) }
-        guard info.st_size <= 2_000_000 else { return .notice("文件超过 2 MB，已跳过预览以保持响应。", path: path) }
+        guard info.st_size <= 2_000_000 else { return .notice("文件超过 2 MB，已跳过文本预览。仍可暂存和提交。", path: path) }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
         let data = try handle.read(upToCount: 2_000_001) ?? Data()
-        guard data.count <= 2_000_000 else { return .notice("文件超过 2 MB，已跳过预览。", path: path) }
-        guard !data.contains(0), let text = String(data: data, encoding: .utf8) else { return .notice("二进制或非 UTF-8 文件，已跳过文本预览。", path: path) }
+        guard data.count <= 2_000_000 else { return .notice("文件超过 2 MB，已跳过文本预览。仍可暂存和提交。", path: path) }
+        guard !data.contains(0), let text = String(data: data, encoding: .utf8) else { return .notice("二进制或非 UTF-8 文件，可照常暂存、提交和推送。", path: path) }
         return .addedText(text, path: path)
     }
 }

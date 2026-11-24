@@ -57,6 +57,7 @@ import SwiftUI
     @objc private func settings() { guard !store.busy else { return }; store.sheet = WorkspaceSheet(kind: .settings) }
     @objc private func commit() { store.prepareCommit(push: false) }
     @objc private func commitPush() { store.prepareCommit(push: true) }
+    @objc private func choosePushTarget() { store.openPush(chooseTarget: true) }
     @objc private func history() { store.page = .history }
     @objc private func refresh() { store.manualRefresh() }
     @objc private func widenCode() { NotificationCenter.default.post(name: .gitToolAdjustSidebar, object: Double(-24)) }
@@ -76,6 +77,7 @@ import SwiftUI
         menu.addItem(withTitle: "关闭窗口", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         let commit = menu.addItem(withTitle: "提交…", action: #selector(commit), keyEquivalent: "k"); commit.target = self
         let push = menu.addItem(withTitle: "提交并推送…", action: #selector(commitPush), keyEquivalent: "k"); push.target = self; push.keyEquivalentModifierMask = [.command, .shift]
+        let pushTarget = menu.addItem(withTitle: "选择推送目标…", action: #selector(choosePushTarget), keyEquivalent: ""); pushTarget.target = self
         let history = menu.addItem(withTitle: "查看历史", action: #selector(history), keyEquivalent: "l"); history.target = self
         file.submenu = menu; main.addItem(file)
         let editItem = NSMenuItem(), edit = NSMenu(title: "编辑")
@@ -99,6 +101,7 @@ import SwiftUI
 extension AppDelegate: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(checkForUpdates) { return AppUpdater.shared.available && AppUpdater.shared.canCheck }
+        if menuItem.action == #selector(choosePushTarget) { return !store.busy && store.repository != nil && store.synchronizedPushSession == nil }
         return true
     }
 }

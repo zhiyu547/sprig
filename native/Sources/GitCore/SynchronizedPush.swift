@@ -10,6 +10,12 @@ public enum PushStrategy: String, Codable, CaseIterable, Sendable {
 }
 public enum PushPhase: String, Codable, Sendable { case ready, protecting, integrating, restoring, restoreConflict }
 
+public struct TrackedPushTarget: Equatable, Sendable {
+    public let destination: PushDestination
+    fileprivate let branchRef: String
+    fileprivate let pushURL: String
+}
+
 /// Stored in the worktree's Git directory, so recovery survives app restarts and
 /// never confuses two worktrees. A stash is identified by OID, never stash@{0}.
 public struct PushSession: Codable, Sendable {
@@ -65,6 +71,26 @@ extension GitRepository {
         let urls = try await checked(["remote", "get-url", "--push", "--all", destination.remote]).split(separator: "\n").map(String.init)
         guard urls.count == 1, let url = urls.first, !url.hasPrefix("-") else { throw GitError.message("自动同步需要唯一的推送地址；此远端配置了多个 push URL，请先调整配置。") }
         return url
+    }
+    public func trackedPushTarget(for branchRef: String) async throws -> TrackedPushTarget? {
+        let prefix = "refs/heads/"
+        guard branchRef.hasPrefix(prefix) else { return nil }
+        let format = "%(refname)%00%(upstream)%00%(upstream:remotename)%00%(upstream:remoteref)%00%(push)%00%(push:remotename)"
+        let refs = try await runner.run(["for-each-ref", "--format=" + format, branchRef], at: root)
+        guard refs.code == 0 else { return nil }
+        let fields = refs.text.trimmingCharacters(in: .newlines).split(separator: "\0", omittingEmptySubsequences: false)
+        // A triangular workflow or a different default push ref needs an explicit choice.
+        guard fields.count == 6, fields[0] == branchRef, !fields[1].isEmpty, fields[1] == fields[4],
+              !fields[2].isEmpty, fields[2] == fields[5], fields[3].hasPrefix(prefix) else { return nil }
+        let branch = String(branchRef.dropFirst(prefix.count))
+        let merge = try await runner.run(["config", "--get-all", "branch.\(branch).merge"], at: root)
+        guard merge.code == 0, merge.text == String(fields[3]) + "\n" else { return nil }
+        let destination = PushDestination(remote: String(fields[2]), branch: String(fields[3].dropFirst(prefix.count)))
+        guard let url = try? await pushAddress(destination) else {
+            try Task.checkCancellation()
+            return nil
+        }
+        return TrackedPushTarget(destination: destination, branchRef: branchRef, pushURL: url)
     }
     private func validatePush(_ session: PushSession, checkHead: Bool = true) async throws {
         let current = try await stamp()
@@ -172,6 +198,7 @@ extension GitRepository {
     }
 
     public func synchronizedPush(to destination: PushDestination, expectedOID: String, strategy: PushStrategy, operation: GitNetworkOperation = GitNetworkOperation(),
+                                 requiring target: TrackedPushTarget? = nil,
                                  progress: @Sendable (String) async -> Void = { _ in }) async throws -> String {
         try operation.checkCancellation()
         let lock = try PushLock(gitDirectory.appendingPathComponent("sprig-push.lock")); defer { withExtendedLifetime(lock) {} }
@@ -179,7 +206,16 @@ extension GitRepository {
         let current = try await stamp(), state = try await snapshot()
         guard current.head == expectedOID, current.head != "(initial)", current.branch != "(detached)" else { throw GitError.message("自动同步需要当前本地分支，且提交未改变。请重新确认推送。") }
         guard state.operation == nil, !state.files.contains(where: \.conflict) else { throw GitError.message("请先完成当前 Git 操作并解决冲突。") }
-        let url = try await pushAddress(destination)
+        let url: String
+        if let target {
+            guard target.branchRef == current.branch, target.destination == destination,
+                  try await trackedPushTarget(for: current.branch) == target else {
+                throw GitError.message("上游分支或推送地址已改变。请重新选择推送目标。")
+            }
+            url = target.pushURL
+        } else {
+            url = try await pushAddress(destination)
+        }
         var session = PushSession(destination: destination, pushURL: url, branchRef: current.branch, expectedOID: expectedOID, strategy: strategy)
         try savePush(session)
         return try await drivePush(&session, operation: operation, progress: progress)

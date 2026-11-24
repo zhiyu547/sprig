@@ -11,9 +11,13 @@ struct WorkspaceSheet: Identifiable {
     let id = UUID()
     let kind: SheetKind
 }
+enum CommitPush {
+    case chooseTarget
+    case tracked(TrackedPushTarget, PushStrategy)
+}
 enum SheetKind {
     case settings
-    case commit(CommitPreparation, Bool)
+    case commit(CommitPreparation, CommitPush?)
     case push(String)
     case newBranch(String?)
     case newTag(String)
@@ -149,47 +153,105 @@ extension RepositoryStore {
     func prepareCommit(push: Bool) {
         guard canCommit, let repository else { return }
         guard !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { error = "请填写提交说明，或使用 AI 生成。"; return }
-        busy = true; busyTitle = "准备提交范围"
+        busy = true; busyTitle = "准备提交范围"; error = nil
         Task {
-            do { let preparation = try await repository.prepareCommit(amend: amend); sheet = WorkspaceSheet(kind: .commit(preparation, push)) }
-            catch { self.error = error.localizedDescription }
+            do {
+                let preparation = try await repository.prepareCommit(amend: amend)
+                var followUp: CommitPush?
+                if push {
+                    followUp = .chooseTarget
+                    if autoSyncPreference, let target = try await repository.trackedPushTarget(for: preparation.stamp.branch) {
+                        followUp = .tracked(target, pushStrategyPreference)
+                    }
+                }
+                sheet = WorkspaceSheet(kind: .commit(preparation, followUp))
+            } catch { self.error = error.localizedDescription }
             busy = false; busyTitle = ""
         }
     }
-    func performCommit(_ preparation: CommitPreparation, push: Bool) {
-        guard !busy else { return }; sheet = nil
+    func performCommit(_ preparation: CommitPreparation, push: CommitPush?) {
+        guard !busy else { return }
+        sheet = nil
         let message = commitMessage; var options = settings.commitOptions; options.amend = amend
-        runOperation(options.amend ? "修正上次提交" : "提交") { repo in
+        let title = options.amend ? "修正上次提交" : "提交"
+        let commit: @MainActor (GitRepository) async throws -> CommitOutcome = { repo in
             let result = try await repo.commit(preparation, message: message, options: options)
-            await MainActor.run {
-                self.messageHistory.removeAll { $0 == message }; self.messageHistory.insert(message, at: 0); self.messageHistory = Array(self.messageHistory.prefix(20))
-                UserDefaults.standard.set(self.messageHistory, forKey: "Sprig.messageHistory")
-                self.commitMessage = ""; self.amend = false; self.aiSource = nil
-                if push { self.pendingPushOID = result.oid; self.sheet = WorkspaceSheet(kind: .push(result.oid)) }
+            self.messageHistory.removeAll { $0 == message }
+            self.messageHistory.insert(message, at: 0)
+            self.messageHistory = Array(self.messageHistory.prefix(20))
+            UserDefaults.standard.set(self.messageHistory, forKey: "Sprig.messageHistory")
+            self.commitMessage = ""; self.amend = false; self.aiSource = nil
+            return result
+        }
+        if case let .tracked(target, strategy)? = push {
+            runNetworkOperation("提交并推送", cancellable: false) { repo, operation in
+                let result = try await commit(repo)
+                let summary = "本地提交 \(result.oid.prefix(8)) 已创建。"
+                self.log(title, summary + "\n" + result.output)
+                self.networkCanCancel = true
+                do {
+                    let output = try await self.pushCommit(in: repo, oid: result.oid, destination: target.destination,
+                                                           strategy: strategy, operation: operation, requiring: target)
+                    return summary + "\n" + output
+                } catch is CancellationError { throw CancellationError() }
+                catch { throw GitError.message(summary + "\n" + error.localizedDescription) }
             }
-            return "提交完成：\(result.oid.prefix(8))\n" + result.output
+        } else {
+            runOperation(title) { repo in
+                let result = try await commit(repo)
+                if case .chooseTarget? = push {
+                    self.pendingPushOID = result.oid; self.pendingPushTarget = nil
+                    self.sheet = WorkspaceSheet(kind: .push(result.oid))
+                }
+                return "提交完成：\(result.oid.prefix(8))\n" + result.output
+            }
         }
     }
-    func openPush() {
-        guard !busy, let repository else { return }
-        if synchronizedPushSession != nil { retryPush(); return }
-        let token = repositoryToken
-        Task { do { let oid = try await repository.headOID(); guard token == repositoryToken else { return }; guard oid != "(initial)" else { error = "当前仓库还没有提交。"; return }; sheet = WorkspaceSheet(kind: .push(oid)) } catch { self.error = error.localizedDescription } }
+    func openPush(chooseTarget: Bool = false) {
+        guard !busy, repository != nil else { return }
+        if synchronizedPushSession != nil {
+            if chooseTarget { error = "请先完成或取消待继续的同步推送，再选择其他目标。" }
+            else { retryPush() }
+            return
+        }
+        let strategy = !chooseTarget && autoSyncPreference ? pushStrategyPreference : nil
+        runNetworkOperation("读取推送目标", cancellable: false) { repo, operation in
+            let stamp = try await repo.stamp()
+            guard stamp.head != "(initial)" else { throw GitError.message("当前仓库还没有提交。") }
+            if let strategy, let target = try await repo.trackedPushTarget(for: stamp.branch) {
+                self.networkCanCancel = true
+                return try await self.pushCommit(in: repo, oid: stamp.head, destination: target.destination,
+                                                 strategy: strategy, operation: operation, requiring: target)
+            }
+            self.sheet = WorkspaceSheet(kind: .push(stamp.head))
+            return "请选择推送目标。"
+        }
     }
     func performPush(oid: String, destination: PushDestination, autoSync: Bool = true, strategy: PushStrategy = .merge) {
         guard !busy else { return }
-        sheet = nil; pendingPushOID = oid; pendingPushTarget = destination
+        sheet = nil
         savePushPreference(autoSync: autoSync, strategy: strategy)
         runNetworkOperation("推送") { repo, operation in
-            let output: String
-            if autoSync {
-                output = try await repo.synchronizedPush(to: destination, expectedOID: oid, strategy: strategy, operation: operation) { title in
-                    await MainActor.run { self.networkStage(title) }
-                }
-            } else { output = try await repo.push(to: destination, expectedOID: oid, operation: operation) }
-            await MainActor.run { self.pendingPushOID = nil; self.pendingPushTarget = nil }
-            return autoSync ? output : "推送完成 → \(destination.remote)/\(destination.branch)\n" + output
+            try await self.pushCommit(in: repo, oid: oid, destination: destination,
+                                      strategy: autoSync ? strategy : nil, operation: operation)
         }
+    }
+    private func pushCommit(in repo: GitRepository, oid: String, destination: PushDestination, strategy: PushStrategy?,
+                            operation: GitNetworkOperation, requiring target: TrackedPushTarget? = nil) async throws -> String {
+        pendingPushOID = oid; pendingPushTarget = destination
+        networkStage("推送到 \(destination.remote)/\(destination.branch)")
+        let output: String
+        if let strategy {
+            output = try await repo.synchronizedPush(to: destination, expectedOID: oid, strategy: strategy,
+                                                     operation: operation, requiring: target) { title in
+                await MainActor.run { self.networkStage(title) }
+            }
+        } else {
+            let result = try await repo.push(to: destination, expectedOID: oid, operation: operation)
+            output = "推送完成 → \(destination.remote)/\(destination.branch)\n" + result
+        }
+        pendingPushOID = nil; pendingPushTarget = nil
+        return output
     }
     func retryPush() {
         if let session = synchronizedPushSession {
@@ -244,7 +306,7 @@ extension RepositoryStore {
         guard !busy, let repository else { return }; busy = true; busyTitle = "检查暂存内容"
         Task {
             do {
-                let preparation = try await repository.prepareCommit(amend: amend)
+                let preparation = try await repository.prepareCommit(amend: amend, includePatch: settings.checkTODO)
                 var report = preparation.checkOutput.isEmpty ? "空白检查：通过。" : "空白检查：\n" + preparation.checkOutput
                 if settings.checkTODO {
                     let todo = preparation.patch.components(separatedBy: "\n").filter { $0.hasPrefix("+") && !$0.hasPrefix("+++") && ($0.localizedCaseInsensitiveContains("TODO") || $0.contains("FIXME")) }
