@@ -20,6 +20,10 @@ NS = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
 KEY_ACCOUNT = "cn.gittool.native.sparkle"
 
 
+def checksum_manifest(assets):
+    return "".join(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in assets)
+
+
 def inspect_archive(archive, config):
     with zipfile.ZipFile(archive) as bundle:
         info = plistlib.loads(bundle.read("Sprig.app/Contents/Info.plist"))
@@ -117,8 +121,7 @@ def main():
     if not args.verify_only:
         assets = [archive, feed]
         assets += sorted(folder.glob("*.dmg"))
-        checksum = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in assets)
-        (folder / "SHA256SUMS.txt").write_text(checksum)
+        (folder / "SHA256SUMS.txt").write_text(checksum_manifest(assets))
     print(f"Verified release {config['version']} (build {config['build']})")
 
 

@@ -56,7 +56,7 @@ python3 native/scripts/prepare_release.py
 
 `prepare_release.py` 从 Keychain 读取密钥；CI 可通过 `SPARKLE_PRIVATE_KEY` 环境变量传入，脚本仅通过 stdin 转交给 Sparkle。签名后使用**公钥**和 CryptoKit 独立验证清单与 ZIP，拒绝版本／公钥／下载地址／版权文件不匹配的包。DMG 不进入 appcast，避免同版本重复条目。
 
-已登录 GitHub CLI、tag 已推送后，可以运行 `python3 native/scripts/publish_release.py`。脚本检查 build 大于当前公开版本、附件完整且签名有效，创建草稿、上传后发布。
+已登录 GitHub CLI、tag 已推送后，可以运行 `python3 native/scripts/publish_release.py`。发布新版本时，build 必须大于当前公开版本。同一版本已在线时，脚本会重新验证公开附件、签名和稳定更新地址，校验通过即完成。新版本仍经过草稿、上传全部附件、正式发布三步。
 
 ## 更新行为与验证
 
